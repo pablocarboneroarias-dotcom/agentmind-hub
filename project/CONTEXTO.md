@@ -213,3 +213,17 @@ y se aplica en S4.
   observabilidad LangSmith, `react_agent.py` production-grade con límites de
   iteraciones/tokens + reintentos, borrador de `IncidentState`, smoke tests.
   Pendiente: generar el dataset sintético.
+- **S2 (construcción, 2026-07-22):** `IncidentState` afinado en `state.py` para
+  cuadrar campo a campo con `spec-intake-agent.md` y `spec-priority-agent.md`
+  (antes era un borrador de S1). `intake_node` y `priority_node` implementados
+  y con tests unitarios sintéticos (12 tests, ver `tests/test_intake_agent.py`
+  y `tests/test_priority_agent.py`). `graph.py` monta el `StateGraph` mínimo
+  Intake -> Priority con las aristas condicionales de ambos specs, más nodos
+  placeholder (`clarification`, `human_review`, `rca`) para no romper el
+  grafo incremental hasta S3/S6. Demo E2E en `scripts/run_pipeline_demo.py`.
+  Se completó también el vocabulario `business_process` que faltaba en
+  `dominio-salesforce.md` (lo pedía el criterio de éxito #2 de Intake) — ver
+  el log de decisiones de ese fichero para el detalle de las 3 reconciliaciones
+  entre specs (vocabulario de business_process, redondeo "Media-alta" -> "alta",
+  tabla de SLA operativa). Pendiente: correr esto contra el modelo real
+  (Ollama/LiteLLM) en vez de los dobles de test, y el "tócalo una vez" de S2.

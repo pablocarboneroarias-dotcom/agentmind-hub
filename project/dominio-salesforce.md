@@ -53,6 +53,37 @@ que lo hacen ideal como dominio de AgentMind Hub:
 | `PLATFORM` | Plataforma (Apex, Flows, permisos, datos) |
 | `ANALYTICS` | Reports, Dashboards, CRM Analytics |
 
+### Procesos de negocio (campo `business_process` del IncidentState)
+
+Vocabulario cerrado que usa Intake para clasificar y que Priority usa como
+clave de lookup en la tabla `business_process → urgencia_base` (S2). Une los
+códigos de ejemplo del spec de Intake con los nombres descriptivos del spec
+de Priority — antes de esta tabla vivían solo en el spec, no en el dominio.
+
+| Código | Descripción | Urgencia base |
+|---|---|---|
+| `CONTRACTING` | Contratación / Alta de suministro | Alta |
+| `OWNERSHIP_CHANGE` | Cambio de titularidad | Alta |
+| `CONTRACT_RENEWAL` | Renovación de contratos | Alta |
+| `SAP_INTEGRATION` | Integraciones con distribuidora / SAP | Alta |
+| `CUSTOMER_SERVICE` | CTI / Atención al cliente (telefonía) | Alta |
+| `COMPLAINTS` | Reclamaciones / Quejas regulatorias | Alta* |
+| `BILLING` | Facturación / Emisión de facturas | Alta* |
+| `COLLECTIONS` | Gestión de cobros / Impagos | Media |
+| `METER_READING` | Lecturas / Telemedida | Media |
+| `REPORTING` | Reporting interno / Dashboards | Baja |
+| `GENERAL_INQUIRY` | Consulta general / Información al cliente | Baja |
+| `SALES_FLOW` | Proceso comercial / pipeline de ventas (Sales Cloud) | Media |
+| `CPQ` | Configuración de precios y ofertas (CPQ) | Alta* |
+| `DATA_INTEGRITY` | Inconsistencia / corrupción de datos entre sistemas o pantallas (sync, duplicados, discrepancias) | Alta |
+
+*El spec de Priority original definía estas tres filas como "Media-alta", un
+nivel que no existe en la escala de 3 niveles (Alta/Media/Baja) que el mismo
+spec declara para `urgency_level`. Se redondean hacia **Alta** por el
+principio de gobernanza del propio spec: un error de urgencia es más costoso
+(afecta al SLA contractual) que uno de impacto, así que ante la duda se
+prioriza de más, no de menos.
+
 ### Severidades (campo `severity` del IncidentState)
 
 | Nivel | Nombre | Criterio | SLA respuesta | SLA resolución |
@@ -247,5 +278,16 @@ test set solo tienen lo que escribiría un usuario real.
   (150 histórico + 30 test + 20 edge cases), coherentes con la taxonomía de este fichero.
 - **2026-07:** Los objetos Salesforce del mapa (Account, Opportunity, Case, etc.) son
   el vocabulario base del Intake Agent para structured output.
-- **2026-07:** El corpus RAG (S3) se indexa en tres colecciones pgvector separadas:
-  `incident_history`, `technical_docs`, `runbooks`. El RCA decide qué colección consultar.
+- **2026-07:** El corpus RAG (S3) se indexa en cuatro colecciones pgvector separadas:
+  `incident_history`, `technical_docs`, `runbooks`, `codebase_artifacts` (esta
+  última se añadió después, ver `docs/specs/rca-decisiones-s3.md` — tool
+  `search_codebase`). El RCA decide qué colección consultar.
+- **2026-07 (S2):** se añade la tabla `business_process → urgencia_base` a este
+  fichero (antes solo vivía en `spec-priority-agent.md`) para que Intake y
+  Priority compartan un único vocabulario cerrado, tal y como exige el
+  criterio de éxito #2 del spec de Intake ("nunca valores libres").
+- **2026-07 (S2):** el SLA operativo que usa `priority_node` es el de
+  `docs/specs/spec-priority-agent.md` (P1 15min/2h, P2 30min/4h, P3 2h/24h,
+  P4 8h/48h), no el de la tabla de "Severidades" de este fichero (que trae
+  otros números). Pendiente de unificar cuando Ellevio confirme sus SLAs
+  contractuales reales (ver nota en el spec de Priority).

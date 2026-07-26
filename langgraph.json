@@ -1,0 +1,7 @@
+{
+  "dependencies": ["./src"],
+  "graphs": {
+    "agentmind": "agentmind.graph:graph"
+  },
+  "env": ".env"
+}
