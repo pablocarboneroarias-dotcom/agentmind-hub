@@ -8,12 +8,14 @@ dependencies = [
     "litellm>=1.50",       # interfaz única de modelos (Claude, OpenAI, Ollama/Qwen, proxy LiteLLM)
     "python-dotenv>=1.0",  # carga de .env
     "langsmith>=0.1.100",  # trazabilidad desde el día 1
+    "langgraph>=1.2.9",
 ]
 
 [project.optional-dependencies]
 # Se instalarán cuando lleguemos a esas semanas; no hacen falta para la Semana 1.
 graph = ["langgraph>=0.2"]      # Semanas 2-3-5
-dev = ["pytest>=8.0", "ruff>=0.6"]
+rag = ["psycopg[binary]>=3.1", "pgvector>=0.3"]  # S3: corpus RAG en pgvector
+dev = ["pytest>=8.0", "ruff>=0.6", "langgraph-cli[inmem]>=0.2"]
 
 [build-system]
 requires = ["hatchling"]

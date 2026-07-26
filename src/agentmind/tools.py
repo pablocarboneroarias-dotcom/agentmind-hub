@@ -5,14 +5,18 @@ Cada herramienta se describe con el schema estilo OpenAI (el que entienden
 Claude, OpenAI y Qwen a través de litellm) y se registra en TOOL_REGISTRY.
 El agente solo conoce el registro: añadir una herramienta no toca el agente.
 
-Cuando construyamos el pipeline real, aquí vivirán tools como
-`search_incident_history` (RAG) o `send_email` (con human-in-the-loop).
+Las 4 tools reales de RAG (S3) viven en `rag.py` y se registran aquí abajo;
+`search_incidents` queda como mock de la Semana 1, superado por
+`query_incident_history` — no se retira porque `react_agent.py` aún puede
+usarlo como demo sin depender de Postgres.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Callable
+
+from . import rag
 
 
 # --- Implementaciones ---------------------------------------------------------
@@ -43,6 +47,10 @@ def search_incidents(query: str) -> str:
 TOOL_REGISTRY: dict[str, Callable[..., str]] = {
     "calculator": calculator,
     "search_incidents": search_incidents,
+    "query_incident_history": rag.query_incident_history,
+    "search_technical_docs": rag.search_technical_docs,
+    "search_runbooks": rag.search_runbooks,
+    "search_codebase": rag.search_codebase,
 }
 
 TOOL_SCHEMAS: list[dict] = [
@@ -75,6 +83,66 @@ TOOL_SCHEMAS: list[dict] = [
                         "type": "string",
                         "description": "Términos de búsqueda (síntoma, sistema...).",
                     }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_incident_history",
+            "description": "Busca en el histórico de incidencias resueltas (RAG semántico) las más parecidas a la consulta.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Síntoma, error o descripción del problema a buscar."},
+                    "k": {"type": "integer", "description": "Número de incidencias a devolver (por defecto 5)."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_technical_docs",
+            "description": "Busca documentación técnica del org (triggers, flows, integraciones, reglas de permisos) relevante a la consulta.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Componente o comportamiento a buscar."},
+                    "k": {"type": "integer", "description": "Número de documentos a devolver (por defecto 5)."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_runbooks",
+            "description": "Busca runbooks de diagnóstico paso a paso; devuelve el procedimiento completo, no un fragmento suelto.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Tipo de problema a diagnosticar."},
+                    "k": {"type": "integer", "description": "Número de runbooks completos a devolver (por defecto 2)."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_codebase",
+            "description": "Busca en artefactos de código sintéticos (fichas de feature, arquitectura, snippets anotados) por síntoma, sin necesitar el nombre exacto del archivo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Descripción del síntoma o comportamiento a buscar en el código."},
+                    "k": {"type": "integer", "description": "Número de fragmentos a devolver (por defecto 5)."},
                 },
                 "required": ["query"],
             },

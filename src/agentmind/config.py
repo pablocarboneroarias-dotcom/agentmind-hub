@@ -41,6 +41,7 @@ DIRECT_MODELS: dict[str, str] = {
     "smart": "anthropic/claude-sonnet-4-5",   # confírmalo con tu config
     "local": "ollama/qwen3:8b",               # tu Qwen local vía Ollama
     "openai": "openai/gpt-4o",
+    "local-embed": "ollama/embeddinggemma",   # embeddings (S3 — corpus RAG), 768 dim
 }
 
 
@@ -62,6 +63,20 @@ def resolve_model(profile: str) -> tuple[str, dict]:
             f"Perfil '{profile}' desconocido. Perfiles directos: {list(DIRECT_MODELS)}"
         )
     return model, {}
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL (S3 — corpus RAG en pgvector)
+# ---------------------------------------------------------------------------
+# `agentmind` es una base propia dentro del Postgres compartido de agentops-lab
+# (mismo servidor que usan n8n/litellm), aislada de sus tablas.
+
+PG_HOST: str = os.getenv("PG_HOST", "localhost")
+PG_PORT: int = int(os.getenv("PG_PORT", "5432"))
+PG_USER: str = os.getenv("PG_USER", "agentops")
+PG_PASSWORD: str = os.getenv("PG_PASSWORD", "")
+PG_ADMIN_DB: str = os.getenv("PG_ADMIN_DB", "agentops")
+PG_RAG_DB: str = os.getenv("PG_RAG_DB", "agentmind")
 
 
 # ---------------------------------------------------------------------------
