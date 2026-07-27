@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import operator
 from enum import Enum
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict, get_args
 
 
 class UrgencyHint(str, Enum):
@@ -23,6 +23,18 @@ class UrgencyHint(str, Enum):
     MEDIUM = "medium"
     HIGH = "high"
     CRITICAL = "critical"
+
+
+# `rca_status` (spec-rca-agent.md) — cerrado de verdad: RCA_STATUSES se deriva
+# de este mismo Literal (no se duplica la lista a mano), y `rca_node` afirma
+# en runtime que el valor final pertenece a este conjunto antes de devolverlo
+# (ver `rca_agent.py`). `Literal` por sí solo es solo tipado estático (mypy);
+# la comprobación en runtime es la que de verdad lo cierra, mismo principio
+# que `domain.CATEGORIES`/`domain.SYSTEMS` para Intake.
+RcaStatus = Literal[
+    "completed", "max_iterations", "token_budget", "insufficient_evidence", "model_error"
+]
+RCA_STATUSES: frozenset[str] = frozenset(get_args(RcaStatus))
 
 
 class IncidentState(TypedDict, total=False):
@@ -70,8 +82,7 @@ class IncidentState(TypedDict, total=False):
     # --- RCA Agent (Semana 3) ---
     root_cause: str                   # "" si rca_status != "completed"
     rca_confidence: float             # 0-100 (spec-rca-agent.md); umbral de corte: 80
-    rca_status: str                   # "completed" | "max_iterations" | "token_budget"
-                                       # | "insufficient_evidence" | "model_error"
+    rca_status: RcaStatus
     rca_corroboration: str            # "multi_source" | "single_source" | ""
     rca_evidence: list[str]           # traza auditable: qué tool se llamó y qué devolvió
     rca_partial_findings: str         # resumen de la investigación, siempre relleno

@@ -22,7 +22,7 @@ from typing import Callable
 from ..config import AgentLimits, DEFAULT_LIMITS
 from ..models import Completion, complete
 from ..observability import traced
-from ..state import IncidentState
+from ..state import RCA_STATUSES, IncidentState
 from ..tools import TOOL_SCHEMAS
 from .react_agent import ReActAgent
 
@@ -142,6 +142,21 @@ def _last_assistant_text(messages: list[dict]) -> str:
     return ""
 
 
+def _finalize(delta: dict) -> dict:
+    """Cierra de verdad el `Literal` de `state.RcaStatus`: si algún camino de
+    código de este fichero llegase a construir un `rca_status` fuera de
+    `RCA_STATUSES` (typo, valor nuevo olvidado de registrar...), esto revienta
+    aquí con un mensaje claro en vez de colar un 6º valor no documentado en
+    silencio."""
+    status = delta["rca_status"]
+    if status not in RCA_STATUSES:
+        raise AssertionError(
+            f"rca_status inválido: {status!r} no está en RCA_STATUSES "
+            f"({sorted(RCA_STATUSES)}) — bug en rca_agent.py, no en la respuesta del modelo."
+        )
+    return delta
+
+
 @traced("rca_node")
 def rca_node(
     state: IncidentState,
@@ -167,7 +182,7 @@ def rca_node(
     try:
         result = agent.run(_build_query(state))
     except Exception as exc:  # noqa: BLE001 - nunca revienta el grafo
-        return {
+        return _finalize({
             "root_cause": "",
             "rca_confidence": 0.0,
             "rca_status": "model_error",
@@ -178,14 +193,14 @@ def rca_node(
             "similar_incidents": [],
             "needs_human_review": True,
             "trace": [f"rca: fallo total del modelo ({exc}) -> model_error"],
-        }
+        })
 
     evidence = _build_evidence(result.messages)
     tool_call_count = _count_tool_calls(result.messages)
 
     # --- Caminos de parada del harness (react_agent.py), no del modelo ---
     if result.stop_reason in ("max_iterations", "token_budget"):
-        return {
+        return _finalize({
             "root_cause": "",
             "rca_confidence": 0.0,
             "rca_status": result.stop_reason,
@@ -202,7 +217,7 @@ def rca_node(
                 f"rca: {result.stop_reason} tras {result.iterations} iteraciones "
                 f"({tool_call_count} tool calls)"
             ],
-        }
+        })
 
     # --- final_answer: parsear el JSON que pide rca-agent-prompt.md ---
     try:
@@ -214,7 +229,7 @@ def rca_node(
         partial_findings = str(data.get("rca_partial_findings", "") or "")
         similar_incidents = list(data.get("similar_incidents") or [])
     except Exception as exc:  # noqa: BLE001 - respuesta final no parseable
-        return {
+        return _finalize({
             "root_cause": "",
             "rca_confidence": 0.0,
             "rca_status": "insufficient_evidence",
@@ -228,7 +243,7 @@ def rca_node(
                 f"rca: respuesta final no parseable -> insufficient_evidence "
                 f"({tool_call_count} tool calls)"
             ],
-        }
+        })
 
     # --- Gates de verificación (spec, "Condición de parada") ------------
     reasoning_notes: list[str] = []
@@ -259,7 +274,7 @@ def rca_node(
     if reasoning_notes:
         trace_msg += " | " + " | ".join(reasoning_notes)
 
-    return {
+    return _finalize({
         "root_cause": final_root_cause,
         "rca_confidence": final_confidence,
         "rca_status": rca_status,
@@ -270,4 +285,4 @@ def rca_node(
         "similar_incidents": final_similar,
         "needs_human_review": rca_status != "completed",
         "trace": [trace_msg],
-    }
+    })

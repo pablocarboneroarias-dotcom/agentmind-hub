@@ -114,7 +114,15 @@ Diseño final (estructura + juicio del modelo):
    degrada a `insufficient_evidence` (mismo razonamiento que el requisito
    estructural: una autodeclaración de confianza no verificada no basta).
 
-## rca_status — 4 valores (CERRADO)
+## rca_status — 5 valores (CERRADO, `Literal` real en `state.RcaStatus`)
+
+Cerrado de verdad, no solo documentado: `state.py` define
+`RcaStatus = Literal["completed", "max_iterations", "token_budget",
+"insufficient_evidence", "model_error"]` y `RCA_STATUSES` (el mismo conjunto,
+derivado con `typing.get_args`, no duplicado a mano). `rca_agent.py` afirma
+en runtime, en cada punto de retorno (`_finalize()`), que el valor final
+pertenece a ese conjunto — un typo o un 6º valor no documentado revienta con
+`AssertionError` explícito en vez de colarse en silencio.
 
 | `rca_status` | Quién lo decide | Significado | Implica |
 |---|---|---|---|
@@ -127,14 +135,19 @@ Diseño final (estructura + juicio del modelo):
 En los cuatro casos que no son `completed` (incluido `model_error`, ver nota
 abajo), `needs_human_review = true`.
 
-**Añadido no-CERRADO (decisión de este spec, no de `rca-decisiones-s3.md`):**
-un 5º valor, `model_error`, para cuando `complete_fn` agota sus reintentos
-por un fallo total del modelo/proveedor (no hubo investigación real, es un
-fallo de infraestructura — distinto de `insufficient_evidence`, que implica
-que SÍ se investigó y aun así no hubo evidencia). `rca_node` nunca deja que
-esto reviente el grafo: lo captura y devuelve este estado degradado. No es
-uno de los 4 tests que pide el "Entregable esperado" más abajo — es manejo
-defensivo, no un camino que el criterio de suficiencia decida.
+**`model_error` — 5º valor, decisión tomada al implementar (no viene de
+`rca-decisiones-s3.md`, que cierra solo 4):** para cuando `complete_fn` agota
+sus reintentos por un fallo total del modelo/proveedor — no hubo
+investigación real, es un fallo de infraestructura, distinto de
+`insufficient_evidence` (que implica que SÍ se investigó y aun así no hubo
+evidencia). Se evaluó la alternativa de reconducirlo a `insufficient_evidence`
+sin 5º valor, pero se descartó: mandaría una señal engañosa a quien consuma
+`rca_status` después (ej. un reintento automático que interprete
+`insufficient_evidence` como "falta corpus" cuando el problema real fue que
+la API del modelo estaba caída). `rca_node` nunca deja que esto reviente el
+grafo: lo captura y devuelve este estado degradado. No es uno de los 4 tests
+que pide el "Entregable esperado" más abajo — es manejo defensivo, no un
+camino que el criterio de suficiencia decida.
 
 ---
 

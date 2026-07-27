@@ -15,7 +15,17 @@ dependencies = [
 # Se instalarán cuando lleguemos a esas semanas; no hacen falta para la Semana 1.
 graph = ["langgraph>=0.2"]      # Semanas 2-3-5
 rag = ["psycopg[binary]>=3.1", "pgvector>=0.3"]  # S3: corpus RAG en pgvector
-dev = ["pytest>=8.0", "ruff>=0.6", "langgraph-cli[inmem]>=0.2"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "langgraph-cli[inmem]>=0.2",
+    # langgraph-api (dependencia transitiva de langgraph-cli[inmem]) importa
+    # fastapi de forma lazy en langgraph_api/auth/custom.py (resolución de
+    # Depends para auth custom) pero NO lo declara como dependencia propia
+    # -> hay que declararlo aquí explícitamente o `langgraph dev` revienta
+    # con ModuleNotFoundError en cuanto ese código se ejecuta.
+    "fastapi>=0.100",
+]
 
 [build-system]
 requires = ["hatchling"]
