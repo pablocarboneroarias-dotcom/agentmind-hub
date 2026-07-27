@@ -5,7 +5,8 @@ Esquema de estado compartido del pipeline de incidencias.
 recibe el state completo y devuelve solo el delta de campos que rellena;
 LangGraph hace el merge. Las secciones de abajo siguen el orden del pipeline
 (Intake -> Priority -> RCA -> Solution -> Comms) y están alineadas campo a
-campo con `docs/specs/spec-intake-agent.md` y `docs/specs/spec-priority-agent.md`.
+campo con `docs/specs/spec-intake-agent.md`, `docs/specs/spec-priority-agent.md`
+y `docs/specs/spec-rca-agent.md`.
 """
 
 from __future__ import annotations
@@ -67,9 +68,15 @@ class IncidentState(TypedDict, total=False):
     priority_reasoning: str           # traza auditable de reglas/gates activados
 
     # --- RCA Agent (Semana 3) ---
-    root_cause: str
-    rca_confidence: float             # 0-1; si baja, el supervisor puede reenrutar
-    similar_incidents: list[str]      # ids recuperados del histórico (RAG)
+    root_cause: str                   # "" si rca_status != "completed"
+    rca_confidence: float             # 0-100 (spec-rca-agent.md); umbral de corte: 80
+    rca_status: str                   # "completed" | "max_iterations" | "token_budget"
+                                       # | "insufficient_evidence" | "model_error"
+    rca_corroboration: str            # "multi_source" | "single_source" | ""
+    rca_evidence: list[str]           # traza auditable: qué tool se llamó y qué devolvió
+    rca_partial_findings: str         # resumen de la investigación, siempre relleno
+    rca_iterations_used: int          # iteraciones del bucle ReAct consumidas
+    similar_incidents: list[str]      # ids de incident_history citados como evidencia
 
     # --- Solution Agent (Semana 4) ---
     proposed_solution: str

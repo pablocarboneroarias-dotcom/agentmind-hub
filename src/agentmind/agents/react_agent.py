@@ -23,11 +23,14 @@ Lo que lo hace "production-grade" (los límites explícitos del plan):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Callable
 
 from ..config import AgentLimits, DEFAULT_LIMITS
-from ..models import Usage, complete
+from ..models import Completion, Usage, complete
 from ..observability import traced
 from ..tools import TOOL_SCHEMAS, run_tool
+
+CompleteFn = Callable[..., Completion]
 
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -58,11 +61,18 @@ class ReActAgent:
         tools_schemas: list[dict] | None = None,
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         limits: AgentLimits = DEFAULT_LIMITS,
+        complete_fn: CompleteFn | None = None,
     ) -> None:
         self.profile = profile
         self.tools_schemas = tools_schemas if tools_schemas is not None else TOOL_SCHEMAS
         self.system_prompt = system_prompt
         self.limits = limits
+        # None (por defecto) -> se resuelve `complete` del módulo en cada
+        # llamada (ver run()), así el monkeypatch de `ra.complete` que ya
+        # usan los tests de Fase 1 sigue funcionando sin cambios. Si se pasa
+        # explícito (RCA Agent, S3), se usa ese en vez del real — mismo
+        # patrón de inyección que ya usan intake_node/priority_node.
+        self._complete_fn = complete_fn
 
     @traced("react_agent.run")
     def run(self, query: str) -> AgentResult:
@@ -85,7 +95,8 @@ class ReActAgent:
                 )
 
             # --- 2) Llamar al modelo (con reintentos gestionados en models.py) ---
-            resp = complete(
+            complete_fn = self._complete_fn or complete
+            resp = complete_fn(
                 self.profile,
                 messages,
                 tools=self.tools_schemas,

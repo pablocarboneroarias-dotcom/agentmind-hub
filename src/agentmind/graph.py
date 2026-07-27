@@ -1,14 +1,14 @@
 """
-StateGraph de AgentMind Hub — grafo incremental (S2: Intake + Priority).
+StateGraph de AgentMind Hub — grafo incremental (S2: Intake + Priority; S3: RCA).
 
 "Grafo incremental" (decisión ya tomada, ver CONTEXTO.md): se monta pronto y
-se le añaden nodos según se construye cada agente. RCA (S3), clarification
-(human-in-the-loop, S6) y human_review (S6) son por ahora ramas placeholder
-que solo dejan una miga de trace y terminan — se sustituyen por agentes
-reales en semanas siguientes, sin tocar la forma del grafo.
+se le añaden nodos según se construye cada agente. `clarification` y
+`human_review` (human-in-the-loop, S6) siguen siendo ramas placeholder que
+solo dejan una miga de trace y terminan; `rca` ya es el agente real (S3).
 
     intake --(route_after_intake)--> clarification | priority
     priority --(route_after_priority)--> human_review | rca
+    rca --> END (Solution Agent, S4, aún no existe — ver spec-rca-agent.md)
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from langgraph.graph import END, StateGraph
 
 from .agents.intake_agent import intake_node, route_after_intake
 from .agents.priority_agent import priority_node, route_after_priority
+from .agents.rca_agent import rca_node
 from .models import Completion, complete
 from .state import IncidentState
 
@@ -38,11 +39,6 @@ def _human_review_node(state: IncidentState) -> dict:
     return {"trace": ["grafo: enrutado a revisión humana (pendiente de HITL en S6)"]}
 
 
-def _rca_placeholder_node(state: IncidentState) -> dict:
-    """Placeholder: el RCA Agent real llega en S3 (RAG + tool use)."""
-    return {"trace": ["grafo: llegó a RCA (agente pendiente de construir en S3)"]}
-
-
 def build_graph(*, complete_fn: CompleteFn = complete):
     """Construye y compila el StateGraph. `complete_fn` se inyecta en los
     nodos que llaman al LLM (por defecto `models.complete`; los tests y el
@@ -53,7 +49,7 @@ def build_graph(*, complete_fn: CompleteFn = complete):
     graph.add_node("priority", partial(priority_node, complete_fn=complete_fn))
     graph.add_node("clarification", _clarification_node)
     graph.add_node("human_review", _human_review_node)
-    graph.add_node("rca", _rca_placeholder_node)
+    graph.add_node("rca", partial(rca_node, complete_fn=complete_fn))
 
     graph.set_entry_point("intake")
     graph.add_conditional_edges(
