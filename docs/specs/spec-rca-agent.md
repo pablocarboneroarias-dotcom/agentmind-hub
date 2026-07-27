@@ -46,6 +46,22 @@ monkeypatch de `ra.complete` sigue funcionando exactamente igual) y permite
 inyectar un doble determinista en `rca_node`, igual que ya hacen
 `intake_node`/`priority_node`.
 
+**Segundo cambio, tras un caso real en producción:** el modelo, tras leer
+el fichero correcto y encontrar un comentario de bug explícito (evidencia
+directa suficiente), siguió "verificando" con más llamadas a la misma tool
+buscando confirmar algo que ninguna tool de este corpus podía darle (schema
+de un objeto custom), hasta agotar el presupuesto de tokens. Se añade
+`max_calls_per_tool` a `ReActAgent` (opcional, `None` por defecto — sin
+tope, comportamiento de Fase 1 intacto): un tope DURO por nombre de tool,
+verificado por código, no por criterio del modelo. `rca_node` lo fija en
+`MAX_CALLS_PER_TOOL = 2` (1 llamada + como mucho 1 de refuerzo); superarlo
+no ejecuta la tool de verdad, devuelve un aviso como observación. Se
+complementa (no sustituye) con una instrucción explícita en
+`rca-agent-prompt.md`: un comentario de bug en el código real ya es
+evidencia `single_source` suficiente, y no existe ninguna tool de inspección
+de schema/metadata más allá de lo ya consultado — el tope de código es la
+red de seguridad, el prompt es lo que evita llegar a necesitarla.
+
 ---
 
 ## Caja de herramientas — 5 tools, todas read-only

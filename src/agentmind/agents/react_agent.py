@@ -62,6 +62,7 @@ class ReActAgent:
         system_prompt: str = DEFAULT_SYSTEM_PROMPT,
         limits: AgentLimits = DEFAULT_LIMITS,
         complete_fn: CompleteFn | None = None,
+        max_calls_per_tool: int | None = None,
     ) -> None:
         self.profile = profile
         self.tools_schemas = tools_schemas if tools_schemas is not None else TOOL_SCHEMAS
@@ -73,6 +74,14 @@ class ReActAgent:
         # explícito (RCA Agent, S3), se usa ese en vez del real — mismo
         # patrón de inyección que ya usan intake_node/priority_node.
         self._complete_fn = complete_fn
+        # None (por defecto) -> sin tope, comportamiento de Fase 1 intacto.
+        # Si se pasa un entero (RCA Agent, S3): tope DURO por nombre de tool,
+        # verificado por código, no por criterio del modelo — mismo principio
+        # que ya usan los gates de rca_node (no confiar en que el modelo se
+        # autorregule). Al superarlo, la tool NO se ejecuta de verdad: se
+        # devuelve un aviso como observación, para no gastar una llamada real
+        # (Postgres/Ollama) en algo que ya se decidió cortar.
+        self.max_calls_per_tool = max_calls_per_tool
 
     @traced("react_agent.run")
     def run(self, query: str) -> AgentResult:
@@ -82,6 +91,7 @@ class ReActAgent:
             {"role": "user", "content": query},
         ]
         usage = Usage()
+        tool_call_counts: dict[str, int] = {}
 
         for iteration in range(1, self.limits.max_iterations + 1):
             # --- 1) Comprobar presupuesto de tokens ANTES de gastar más ---
@@ -119,7 +129,21 @@ class ReActAgent:
 
             # --- 4) Ejecutar cada herramienta y adjuntar la observación ---
             for call in resp.tool_calls:
-                observation = run_tool(call["name"], call["arguments"])
+                name = call["name"]
+                tool_call_counts[name] = tool_call_counts.get(name, 0) + 1
+                if (
+                    self.max_calls_per_tool is not None
+                    and tool_call_counts[name] > self.max_calls_per_tool
+                ):
+                    observation = (
+                        f"Aviso: ya has llamado a '{name}' {tool_call_counts[name] - 1} "
+                        f"vez/veces en esta investigación (tope: {self.max_calls_per_tool}). "
+                        "Esta llamada NO se ha ejecutado. Si ya tienes evidencia suficiente, "
+                        "concluye ahora con tu respuesta final. Si de verdad necesitas más "
+                        "información, prueba una herramienta distinta en vez de repetir esta."
+                    )
+                else:
+                    observation = run_tool(name, call["arguments"])
                 messages.append(
                     {
                         "role": "tool",

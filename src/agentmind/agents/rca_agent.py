@@ -48,6 +48,14 @@ RCA_TOOL_SCHEMAS = [s for s in TOOL_SCHEMAS if s["function"]["name"] in _RCA_TOO
 MIN_TOOL_CALLS_FOR_COMPLETED = 2
 CONFIDENCE_THRESHOLD = 80
 
+# Tope duro por tool (ver react_agent.ReActAgent.max_calls_per_tool): 1
+# llamada inicial + como mucho 1 de refuerzo. Verificado por código, no por
+# criterio del modelo — visto en producción que el modelo, tras encontrar
+# evidencia directa suficiente (un comentario de bug explícito en el código
+# real), seguía "verificando" con más llamadas a la misma tool en vez de
+# concluir, hasta agotar el presupuesto de tokens.
+MAX_CALLS_PER_TOOL = 2
+
 
 def _build_query(state: IncidentState) -> str:
     """Contexto del ticket ya clasificado/priorizado, como pregunta inicial
@@ -177,6 +185,7 @@ def rca_node(
         system_prompt=_SYSTEM_PROMPT,
         limits=limits,
         complete_fn=complete_fn,
+        max_calls_per_tool=MAX_CALLS_PER_TOOL,
     )
 
     try:

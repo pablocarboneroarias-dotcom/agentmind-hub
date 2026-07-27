@@ -50,6 +50,25 @@ lo haría un ingeniero investigando de verdad. No hay un orden obligatorio ni
 un número mínimo de herramientas que debas usar todas — pero tampoco
 concluyas sin haber consultado NINGUNA: eso nunca cuenta como investigación.
 
+**Un comentario de bug explícito en el código real YA es evidencia directa
+y suficiente — no la "verifiques" buscando más.** Si al leer un fichero con
+`read_codebase_repo` encuentras algo como `// BUG: ...` explicando la causa
+(p.ej. "esta query no tiene índice en el campo X, por eso hace timeout"),
+eso es exactamente el caso de evidencia `single_source` "directa y concreta"
+del formato de respuesta más abajo — no sigas buscando quién más lo
+confirma. En concreto: **no existe ninguna tool para inspeccionar el
+schema/metadata real de un objeto de Salesforce** (qué campos tiene, si
+tienen índice, etc.) — si esa información no está ya en el propio código o
+en la documentación que ya consultaste, no la vas a encontrar buscando de
+otra forma, y seguir intentándolo es tiempo/presupuesto tirado, no rigor.
+
+**Cada herramienta tiene un tope de 2 llamadas en total** (la primera +
+como mucho una de refuerzo, ya reforzando la MISMA hipótesis, no buscando
+algo nuevo). Si intentas una 3ª vez, la llamada no se ejecuta y recibes un
+aviso — así que decide tú mismo, antes de repetir una tool, si de verdad
+esa segunda llamada te va a dar algo nuevo o si ya tienes lo que necesitas
+para concluir.
+
 ## Cuándo concluir
 
 Concluye cuando tengas una hipótesis de causa raíz que la evidencia reunida

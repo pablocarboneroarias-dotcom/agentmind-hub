@@ -61,3 +61,34 @@ def test_stops_on_token_budget(monkeypatch):
     agent = ra.ReActAgent(limits=AgentLimits(max_iterations=50, token_budget=20))
     result = agent.run("gasta tokens")
     assert result.stop_reason == "token_budget"
+
+
+def test_max_calls_per_tool_bloquea_repeticiones_sin_ejecutar_la_tool(monkeypatch):
+    """La 3ª llamada a la misma tool (tope=2) no debe ejecutar run_tool de
+    verdad — solo debe devolver el aviso como observación."""
+    monkeypatch.setattr(ra, "complete", _fake_complete_always_calls_tool)
+
+    real_calls: list[str] = []
+    original_run_tool = ra.run_tool
+
+    def _spy_run_tool(name, arguments):
+        real_calls.append(name)
+        return original_run_tool(name, arguments)
+
+    monkeypatch.setattr(ra, "run_tool", _spy_run_tool)
+
+    agent = ra.ReActAgent(
+        limits=AgentLimits(max_iterations=5, token_budget=100_000),
+        max_calls_per_tool=2,
+    )
+    result = agent.run("repite la misma tool varias veces")
+
+    assert result.stop_reason == "max_iterations"
+    # 5 iteraciones piden la tool 5 veces, pero solo debería EJECUTARSE 2.
+    assert real_calls == ["calculator", "calculator"]
+
+    tool_messages = [m for m in result.messages if m.get("role") == "tool"]
+    assert len(tool_messages) == 5
+    assert "NO se ha ejecutado" in tool_messages[2]["content"]
+    assert "NO se ha ejecutado" in tool_messages[3]["content"]
+    assert "NO se ha ejecutado" in tool_messages[4]["content"]
