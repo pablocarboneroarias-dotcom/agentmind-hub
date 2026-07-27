@@ -17,6 +17,7 @@ import json
 from typing import Callable
 
 from . import rag
+from .codebase_repo import read_codebase_repo
 
 
 # --- Implementaciones ---------------------------------------------------------
@@ -51,6 +52,7 @@ TOOL_REGISTRY: dict[str, Callable[..., str]] = {
     "search_technical_docs": rag.search_technical_docs,
     "search_runbooks": rag.search_runbooks,
     "search_codebase": rag.search_codebase,
+    "read_codebase_repo": read_codebase_repo,
 }
 
 TOOL_SCHEMAS: list[dict] = [
@@ -145,6 +147,23 @@ TOOL_SCHEMAS: list[dict] = [
                     "k": {"type": "integer", "description": "Número de fragmentos a devolver (por defecto 5)."},
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_codebase_repo",
+            "description": "Lee el contenido EXACTO de un fichero real del repo de juguete (codebase-toy-repo/), sin resumir. Úsalo cuando ya sepas qué fichero quieres mirar (p.ej. tras un resultado de search_codebase) y necesites verificar el código tal cual, no un resumen semántico.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Ruta relativa a la raíz de codebase-toy-repo/, p.ej. 'src/triggers/OpportunityTrigger.cls'.",
+                    },
+                },
+                "required": ["path"],
             },
         },
     },

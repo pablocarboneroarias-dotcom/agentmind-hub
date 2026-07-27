@@ -8,6 +8,10 @@ dist/
 *.egg-info/
 .DS_Store
 .langgraph_api/
+
+# Repo de juguete con su propio historial git independiente (S3, tool
+# read_codebase_repo) — no se trata como submódulo ni se sube anidado.
+codebase-toy-repo/
 data/incidents/**/*.json
 !data/incidents/.gitkeep
 data/technical_docs/*.json
