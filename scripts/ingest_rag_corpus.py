@@ -26,6 +26,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from _corpus_common import CODE_FILE_PATH_BY_ARCHETYPE_ID, FEATURE_DOC_PATH_BY_ARCHETYPE_ID
+
 import psycopg
 from pgvector import Vector
 from pgvector.psycopg import register_vector
@@ -144,6 +146,11 @@ def _build_runbook_rows() -> list[dict]:
     return rows
 
 
+def _archetype_id(artifact_id: str) -> int:
+    """'FEAT-006' / 'SNIP-006' -> 6 (convención de generate_codebase_artifacts.py)."""
+    return int(artifact_id.split("-")[1])
+
+
 def _build_codebase_rows() -> list[dict]:
     rows = []
 
@@ -160,6 +167,7 @@ def _build_codebase_rows() -> list[dict]:
                 "related_business_process": fc.get("related_business_process"),
                 "chunk_text": fc.get("content_text"),
                 "embedding_text": fc.get("content_text"),
+                "file_path": FEATURE_DOC_PATH_BY_ARCHETYPE_ID.get(_archetype_id(fc["artifact_id"])),
             }
         )
 
@@ -180,6 +188,8 @@ def _build_codebase_rows() -> list[dict]:
                     "related_business_process": None,
                     "chunk_text": chunk_text,
                     "embedding_text": chunk_text,
+                    # La ficha de arquitectura del repo de juguete ES el README.
+                    "file_path": "README.md",
                 }
             )
 
@@ -197,6 +207,7 @@ def _build_codebase_rows() -> list[dict]:
                 "related_business_process": snip.get("related_business_process"),
                 "chunk_text": snip.get("code_text"),
                 "embedding_text": embedding_text,
+                "file_path": CODE_FILE_PATH_BY_ARCHETYPE_ID.get(_archetype_id(snip["artifact_id"])),
             }
         )
     return rows

@@ -54,7 +54,15 @@ CREATE TABLE codebase_artifacts (
     related_business_process TEXT,
     chunk_text TEXT,
     embedding_text TEXT,
-    embedding VECTOR(768)
+    embedding VECTOR(768),
+    -- Añadida tras detectar en producción que el RCA Agent encontraba el
+    -- componente correcto por RAG pero no tenía forma de saber la ruta real
+    -- del fichero en codebase-toy-repo/ (adivinaba convenciones genéricas de
+    -- Salesforce DX que no existen en este repo de juguete), gastando tool
+    -- calls e iteraciones hasta agotar el presupuesto de tokens. NULL cuando
+    -- el artefacto no tiene un fichero real (componentes declarativos: sharing
+    -- rules, dedup rules, price rules, dashboards, workflow rules).
+    file_path TEXT
 );
 
 CREATE INDEX ON codebase_artifacts USING hnsw (embedding vector_cosine_ops);

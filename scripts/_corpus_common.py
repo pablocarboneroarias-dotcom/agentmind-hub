@@ -43,6 +43,35 @@ ARCHETYPES: list[Archetype] = [
 
 ARCHETYPES_BY_ID: dict[int, Archetype] = {a.id: a for a in ARCHETYPES}
 
+# Rutas reales dentro de codebase-toy-repo/, una por arquetipo, para poblar
+# codebase_artifacts.file_path (ingest_rag_corpus.py). Solo 5 arquetipos
+# tienen código real (los otros son componentes declarativos: sharing rule,
+# dedup rule, price rule, dashboard, workflow rule — ver
+# codebase-toy-repo/README.md), así que los demás quedan fuera de este dict
+# a propósito (.get() -> None -> file_path NULL, no un valor inventado).
+CODE_FILE_PATH_BY_ARCHETYPE_ID: dict[int, str] = {
+    1: "src/triggers/OpportunityTrigger.cls",
+    2: "src/flows/Case_Onboarding_Flow.md",
+    3: "src/integrations/SAP_Middleware_Connector.cls",
+    6: "src/batch/CPQ_Pricing_Batch_Job.cls",
+    10: "src/lwc/ContractManagementLWC.js",
+}
+
+# Rutas de las fichas de feature (docs/features/*.md) por arquetipo. El
+# arquetipo 9 (Lead_Welcome_Workflow_Rule) no tiene ficha en el repo de
+# juguete (no estaba en la lista original de docs/features/) -> queda fuera.
+FEATURE_DOC_PATH_BY_ARCHETYPE_ID: dict[int, str] = {
+    1: "docs/features/cierre-oportunidad.md",
+    2: "docs/features/flow-onboarding-case.md",
+    3: "docs/features/integracion-sap.md",
+    4: "docs/features/permisos-cuentas.md",
+    5: "docs/features/duplicados-account.md",
+    6: "docs/features/cpq-batch-pricing.md",
+    7: "docs/features/cpq-descuentos.md",
+    8: "docs/features/dashboard-pipeline.md",
+    10: "docs/features/contract-management-lwc.md",
+}
+
 
 def generate_json(prompt: str, profile: str = "smart", timeout: int = 180):
     """Llama a complete() pidiendo JSON y parsea la respuesta.

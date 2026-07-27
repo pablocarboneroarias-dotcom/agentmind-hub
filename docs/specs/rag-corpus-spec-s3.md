@@ -105,11 +105,25 @@ CREATE TABLE codebase_artifacts (
     related_business_process TEXT,
     chunk_text TEXT,
     embedding_text TEXT,
-    embedding VECTOR(768)
+    embedding VECTOR(768),
+    file_path TEXT                  -- añadida tras uso real, ver nota abajo
 );
 
 CREATE INDEX ON codebase_artifacts USING hnsw (embedding vector_cosine_ops);
 ```
+
+**Columna `file_path` (añadida tras el primer uso real del RCA Agent, no en
+la versión original de este spec):** ruta relativa dentro de
+`codebase-toy-repo/` del fichero real que corresponde a este artefacto
+(ej. `"src/batch/CPQ_Pricing_Batch_Job.cls"`), o `NULL` si el artefacto
+describe algo declarativo sin fichero real (sharing rules, dedup rules,
+price rules, dashboards, workflow rules — ver `codebase-toy-repo/README.md`).
+Se añadió al detectar en producción que el RCA Agent encontraba el
+componente correcto por `search_codebase` pero no tenía forma de saber su
+ruta real, y gastaba tool calls adivinando convenciones genéricas de
+Salesforce DX (`force-app/main/default/classes/...`) que no existen en este
+repo de juguete — `search_codebase` ahora devuelve `file_path` directamente
+cuando existe, así `read_codebase_repo` puede usarlo sin adivinar.
 
 **Criterio de troceado (aplicar por tipo):**
 - `feature_card`: NO trocear — documento corto, un solo tema.

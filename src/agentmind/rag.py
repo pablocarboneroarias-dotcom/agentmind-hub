@@ -185,7 +185,7 @@ def search_codebase(query: str, k: int = 5) -> str:
                 """
                 SELECT chunk_id, artifact_type, parent_doc_id, parent_title,
                        chunk_index, total_chunks, related_objects,
-                       related_business_process, chunk_text,
+                       related_business_process, chunk_text, file_path,
                        (embedding <=> %(qvec)s) AS distance
                 FROM codebase_artifacts
                 ORDER BY distance
@@ -202,11 +202,16 @@ def search_codebase(query: str, k: int = 5) -> str:
 
     lines = [f'{len(rows)} artefacto(s) de código encontrados para: "{query}"\n']
     for i, r in enumerate(rows, 1):
-        chunk_id, artifact_type, parent_doc_id, parent_title, chunk_index, total_chunks, related_objects, related_business_process, chunk_text, distance = r
+        chunk_id, artifact_type, parent_doc_id, parent_title, chunk_index, total_chunks, related_objects, related_business_process, chunk_text, file_path, distance = r
         pos = f" (parte {chunk_index + 1}/{total_chunks})" if chunk_index is not None else ""
+        ruta = (
+            f"ruta_repo={file_path} (usa read_codebase_repo con esta ruta EXACTA)"
+            if file_path
+            else "ruta_repo=(sin fichero real — componente declarativo, no hay .cls/.js que leer)"
+        )
         lines.append(
             f"{i}. [{chunk_id}] distancia={distance:.3f} | tipo={artifact_type} "
             f"titulo={parent_title}{pos} objetos={related_objects} "
-            f"proceso_negocio={related_business_process}\n   {_truncate(chunk_text)}"
+            f"proceso_negocio={related_business_process} | {ruta}\n   {_truncate(chunk_text)}"
         )
     return "\n".join(lines)

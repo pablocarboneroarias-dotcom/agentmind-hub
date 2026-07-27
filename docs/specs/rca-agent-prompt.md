@@ -27,6 +27,19 @@ en Salesforce ni en el repositorio de código — todas son de consulta.
    sobre lo que el código realmente hace; si algo importante depende de
    verificarlo, lee el fichero real antes de concluir.**
 
+   **No adivines la ruta.** `search_codebase` devuelve un campo `ruta_repo`
+   con la ruta EXACTA cuando el artefacto tiene fichero real — úsala tal
+   cual, no la reconstruyas a mano ni asumas convenciones genéricas de
+   Salesforce DX (`force-app/main/default/classes/...`): **este repo de
+   juguete no las sigue**, tiene su propia estructura simple
+   (`src/triggers/`, `src/flows/`, `src/integrations/`, `src/batch/`,
+   `src/lwc/`). Si `ruta_repo` viene vacío ("sin fichero real"), es que el
+   componente es declarativo (sharing rule, dedup rule, price rule,
+   dashboard, workflow rule) y no hay `.cls`/`.js` que leer — no insistas
+   adivinando rutas, quédate con la evidencia semántica que ya tienes. Si
+   aun así tienes dudas sobre la estructura del repo, lee
+   `"README.md"` con esta misma tool antes de intentar una ruta a ciegas.
+
 ## Cómo investigar
 
 Empieza por el conocimiento (histórico, docs técnicas, runbooks). Si con
