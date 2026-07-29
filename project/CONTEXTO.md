@@ -102,7 +102,7 @@ Cada semana: **Decisión de arquitectura** · **Tócalo una vez** (hands-on mín
 - **Entregable:** grafo con Intake + Priority funcionando, y tú capaz de explicar por
   qué cada uno es workflow o agente.
 
-### S3 — LangGraph II: subgrafos + RAG → RCA Agent
+### S3 — LangGraph II: subgrafos + RAG → RCA Agent  *(cerrado 2026-07-29)*
 - **Decisión:** diseño del RAG (qué indexas del histórico, chunking, embeddings,
   pgvector sobre Postgres); por qué el RCA **es un agente** (razonamiento multi-paso).
 - **Tócalo una vez:** una consulta RAG mínima a mano (embed → retrieve → mira qué
@@ -227,8 +227,9 @@ y se aplica en S4.
   entre specs (vocabulario de business_process, redondeo "Media-alta" -> "alta",
   tabla de SLA operativa). Pendiente: correr esto contra el modelo real
   (Ollama/LiteLLM) en vez de los dobles de test, y el "tócalo una vez" de S2.
-- **S3 (construcción, 2026-07-27/28):** corpus RAG + RCA Agent completos y
-  probados contra `langgraph dev` real (no solo dobles de test).
+- **S3 (construcción, 2026-07-27/29) — CERRADO:** corpus RAG + RCA Agent
+  completos, probados contra `langgraph dev` real (no solo dobles de test) y
+  con el coste dimensionado sobre datos reales, no estimados.
   - **Corpus pgvector** (`docs/specs/rag-corpus-spec-s3.md`): 4 tablas —
     `incident_history` (150), `technical_docs` (25), `runbooks` (40 chunks
     de 8 runbooks), `codebase_artifacts` (27, incluida columna `file_path`
@@ -250,26 +251,77 @@ y se aplica en S4.
     autodeclarado por el modelo: ≥2 tool calls y confianza ≥80 (si no,
     degrada a `insufficient_evidence`). `graph.py`: `_rca_placeholder_node`
     sustituido por el nodo real, sin tocar `intake`/`priority`.
-  - **Dos bugs reales encontrados y corregidos ejecutando contra el modelo
-    de verdad** (no en tests con dobles): (1) el agente adivinaba rutas de
-    Salesforce DX genéricas al intentar `read_codebase_repo` porque
-    `search_codebase` no exponía la ruta real → se añadió
-    `codebase_artifacts.file_path`, expuesto como `ruta_repo` en el
-    resultado. (2) el agente, tras encontrar evidencia directa suficiente
-    (un comentario de bug explícito en el código), seguía "verificando" con
-    más llamadas a la misma tool hasta agotar `token_budget` → se añadió
-    `max_calls_per_tool` a `ReActAgent` (tope duro de 2 por tool,
-    verificado por código) + instrucción explícita en el prompt.
+  - **Tres bugs reales encontrados y corregidos ejecutando contra el modelo
+    de verdad** (no en tests con dobles), en orden:
+    1. El agente adivinaba rutas de Salesforce DX genéricas al intentar
+       `read_codebase_repo` porque `search_codebase` no exponía la ruta
+       real → se añadió `codebase_artifacts.file_path`, expuesto como
+       `ruta_repo` en el resultado.
+    2. Tras encontrar evidencia directa suficiente (un comentario de bug
+       explícito en el código), el agente seguía "verificando" con más
+       llamadas a la misma tool hasta agotar `token_budget` → se añadió
+       `max_calls_per_tool` a `ReActAgent` (tope duro de 2 por tool,
+       verificado por código, no por criterio del modelo) + instrucción
+       explícita en el prompt sobre cuándo la evidencia directa ya basta.
+    3. Confirmado el fix anterior (nunca más de 2 llamadas reales por
+       tool), un ticket que necesitaba varias tools distintas seguía
+       cortándose en `token_budget` — el corte se comprueba en
+       `react_agent.py` ANTES de cada llamada al modelo y es acumulativo
+       entre turnos, así que el `token_budget` genérico (60k) podía
+       agotarse antes de que el modelo llegara a su paso de "cuándo
+       concluir", sin que el prompt del punto 2 tuviera ocasión de
+       aplicarse. **Medido con llamadas reales al modelo (no estimado):**
+       una investigación con bug directo en código cuesta ~29.6k tokens
+       totales (28,506 prompt + 1,059 completion), una sin match exacto
+       que fuerza patrón multi-fuente ~42.6k tokens — con precio real de
+       Sonnet ($3/$15 por MTok, `claude-sonnet-4-5`), eso es **~$0.10–0.15
+       por RCA completado**, frente a ~$0.21 tirados en uno que agota el
+       budget sin concluir nada. Fix: `token_budget` elevado SOLO para
+       prioridad P1 (`RCA_LIMITS_P1` = 12 iteraciones / 150k tokens);
+       P2/P3/P4 se quedan en `DEFAULT_LIMITS` (8 iter / 60k) porque el
+       coste medido cabe de sobra ahí y correrán muchas incidencias al
+       día. `rca_node` resuelve el límite por `state["priority"]` cuando
+       no se le pasa `limits` explícito (los tests siguen pudiendo forzar
+       cualquier valor); `graph.py` no necesitó cambios. Probado
+       end-to-end en Studio con un ticket P1 real (frase crítica de
+       impacto + `business_process=CONTRACTING`) — `priority_reasoning`
+       en el estado resultante confirma que entró por la rama P1.
+  - **Ajuste de prompt (`rca-agent-prompt.md`):** distingue explícitamente
+    el caso "patrón parecido pero no exacto" (mismo componente, mismo tipo
+    de fallo, síntoma literal distinto) — en ese caso el agente sigue
+    devolviendo `insufficient_evidence`, pero debe nombrar el patrón y su
+    propia confianza en `rca_partial_findings` en vez de "no encontré
+    nada".
   - **Infra:** `fastapi` añadido al grupo `dev` (dependencia transitiva no
     declarada de `langgraph-api`, sin él `langgraph dev` revienta).
-  - **Estado real, no proyectado:** probado end-to-end vía `langgraph dev` +
-    LangSmith Studio con un ticket real de CPQ — el pipeline completo
-    (Intake → Priority → RCA) corrió contra Postgres/Ollama/Claude real y
-    encontró la causa raíz correcta tras las dos correcciones de arriba.
-  - **30 tests** (`test_react_agent.py`, `test_codebase_repo.py`,
-    `test_rca_agent.py`, más los de S2), todos en verde.
-  - **Pendiente:** correr el test set completo (`data/incidents/test/`, 30
-    tickets) y los edge cases (`data/incidents/edge_cases/`, 20) contra el
-    pipeline real para evaluar end-to-end, y el "tócalo una vez" formal de
-    S3 (ya cubierto en la práctica: las consultas RAG manuales de
-    `scripts/verify_rag_loop.py` y las dos ejecuciones reales de arriba).
+  - **31 tests** (`test_react_agent.py`, `test_codebase_repo.py`,
+    `test_rca_agent.py` — incluye el test que prueba que P1 y el resto
+    reciben `AgentLimits` distintos sin pasar `limits` a mano —, más los
+    de S2), todos en verde.
+  - **"Tócalo una vez" de S3:** cubierto en la práctica — consultas RAG
+    manuales (`scripts/verify_rag_loop.py`), varias ejecuciones reales
+    contra Postgres/Ollama/Claude vía `langgraph dev`/Studio, y la
+    medición real de tokens/coste de esta sesión (punto 3 de arriba).
+  - **Diferido, NO bloqueante para haber cerrado S3:** correr el test set
+    completo (`data/incidents/test/`, 30 tickets) y los edge cases
+    (`data/incidents/edge_cases/`, 20) contra el pipeline real para una
+    evaluación cuantitativa formal (% completed vs insufficient_evidence,
+    distribución real de tokens por caso). Decisión explícita: no hace
+    falta para arrancar S4 — es una tarea de evaluación que se puede
+    retomar cuando convenga, no una dependencia de Solution Agent.
+
+## Dónde estamos ahora (2026-07-29)
+
+- **Cerradas:** S1, S2, S3. Pipeline real Intake → Priority → RCA corriendo
+  end-to-end contra Postgres/Ollama/Claude vía `langgraph dev`, con RAG,
+  tool use, gates de verificación y presupuesto por prioridad. 31 tests en
+  verde. Nada pendiente de S1/S2/S3 bloquea seguir.
+- **Sin empezar todavía:** S4 (Claude Agent SDK + subagentes → Solution
+  Agent), y todo lo de después (S5 supervisor/routing, S6 HITL + Comms,
+  S7 MCP/Gmail, S8 evaluación + demo).
+- **Próximo paso concreto:** arrancar S4 con el bucle SDD de siempre —
+  decisión de arquitectura (orquestador-worker, subagentes vs. teams,
+  routing de modelo interno) → spec del Solution Agent (subagente tipo
+  Corrective Developer) → revisión → Claude Code implementa.
+- **Deuda abierta, no urgente:** evaluación cuantitativa del test
+  set/edge cases de S3 (ver arriba) — retomar cuando convenga, no bloquea S4.
