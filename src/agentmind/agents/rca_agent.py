@@ -56,6 +56,16 @@ CONFIDENCE_THRESHOLD = 80
 # concluir, hasta agotar el presupuesto de tokens.
 MAX_CALLS_PER_TOOL = 2
 
+# token_budget elevado SOLO para P1. Medido con llamadas reales al modelo
+# (no estimado): una investigación con bug directo en código cuesta ~29.6k
+# tokens totales, una sin match exacto que fuerza patrón multi-fuente ~42.6k
+# — ambas caben de sobra en DEFAULT_LIMITS.token_budget (60k), que por eso
+# se mantiene para P2/P3/P4. P1 son las incidencias más críticas: si una
+# investigación P1 necesita más margen para llegar a una conclusión real en
+# vez de cortarse en insufficient_evidence, ese gasto extra está justificado;
+# para el resto de prioridades no lo está (correrán muchas al día).
+RCA_LIMITS_P1 = AgentLimits(max_iterations=12, token_budget=150_000)
+
 
 def _build_query(state: IncidentState) -> str:
     """Contexto del ticket ya clasificado/priorizado, como pregunta inicial
@@ -170,15 +180,21 @@ def rca_node(
     state: IncidentState,
     *,
     complete_fn: CompleteFn = complete,
-    limits: AgentLimits = DEFAULT_LIMITS,
+    limits: AgentLimits | None = None,
 ) -> dict:
     """Nodo LangGraph de RCA. Recibe el IncidentState (Intake + Priority ya
     aplicados), devuelve el delta con la causa raíz o el motivo de no
     haberla encontrado (`rca_status`, ver spec).
 
     `limits` es inyectable (igual que `complete_fn`) para que los tests
-    puedan forzar `max_iterations`/`token_budget` sin esperar al límite por
-    defecto de 8 iteraciones."""
+    puedan forzar `max_iterations`/`token_budget` exactos sin depender de la
+    prioridad del ticket. Si no se pasa explícitamente (el caso real en
+    `graph.py`), se elige según `state["priority"]`: `RCA_LIMITS_P1` para
+    incidencias P1, `DEFAULT_LIMITS` (8 iteraciones / 60k tokens) para el
+    resto — ver la nota junto a `RCA_LIMITS_P1` arriba."""
+    if limits is None:
+        limits = RCA_LIMITS_P1 if state.get("priority") == "P1" else DEFAULT_LIMITS
+
     agent = ReActAgent(
         profile=_PROFILE,
         tools_schemas=RCA_TOOL_SCHEMAS,

@@ -13,8 +13,8 @@ from __future__ import annotations
 import json
 
 import agentmind.agents.react_agent as ra
-from agentmind.agents.rca_agent import rca_node
-from agentmind.config import AgentLimits
+from agentmind.agents.rca_agent import RCA_LIMITS_P1, rca_node
+from agentmind.config import DEFAULT_LIMITS, AgentLimits
 from agentmind.models import Completion
 
 
@@ -182,6 +182,45 @@ def test_rca_insufficient_evidence(monkeypatch):
     assert delta["needs_human_review"] is True
     assert "IVA" in delta["rca_partial_findings"]
     assert len(delta["rca_evidence"]) == 3
+
+
+# --- P1 recibe más presupuesto automáticamente (sin pasar `limits`) ------------
+
+def test_p1_recibe_mas_presupuesto_que_el_resto_sin_pasar_limits(monkeypatch):
+    """Coste real medido (llamadas reales al modelo): un RCA con bug directo
+    cuesta ~29.6k tokens, uno sin match exacto ~42.6k — ambos caben en
+    DEFAULT_LIMITS (60k). Por eso solo P1 (las incidencias más críticas)
+    justifica el presupuesto elevado de RCA_LIMITS_P1; el resto de
+    prioridades se queda en DEFAULT_LIMITS. Aquí NO se pasa `limits`
+    explícitamente -> debe resolverse solo a partir de `state['priority']`."""
+    monkeypatch.setattr(ra, "run_tool", _fake_run_tool_ok)
+
+    def fake_complete_always_calls_tool(profile, messages, tools=None, **kwargs):
+        # Nunca da respuesta final -> corta por max_iterations, revelando
+        # qué AgentLimits se usó de verdad para cada prioridad.
+        return _tool_call_completion("query_incident_history", {"query": "algo"}, call_id="x")
+
+    state_p1 = _base_state(priority="P1")
+    delta_p1 = rca_node(state_p1, complete_fn=fake_complete_always_calls_tool)
+    assert delta_p1["rca_status"] == "max_iterations"
+    assert delta_p1["rca_iterations_used"] == RCA_LIMITS_P1.max_iterations
+
+    state_p2 = _base_state(priority="P2")
+    delta_p2 = rca_node(state_p2, complete_fn=fake_complete_always_calls_tool)
+    assert delta_p2["rca_status"] == "max_iterations"
+    assert delta_p2["rca_iterations_used"] == DEFAULT_LIMITS.max_iterations
+
+    # Confirma que de verdad son presupuestos distintos, no una coincidencia.
+    assert RCA_LIMITS_P1.max_iterations != DEFAULT_LIMITS.max_iterations
+    assert RCA_LIMITS_P1.token_budget != DEFAULT_LIMITS.token_budget
+
+    # `limits` explícito (uso de test) sigue ganando siempre a la prioridad.
+    delta_override = rca_node(
+        _base_state(priority="P1"),
+        complete_fn=fake_complete_always_calls_tool,
+        limits=AgentLimits(max_iterations=2, token_budget=100_000),
+    )
+    assert delta_override["rca_iterations_used"] == 2
 
 
 # --- Bonus: gate estructural degrada 'completed' con <2 tool calls -------------
