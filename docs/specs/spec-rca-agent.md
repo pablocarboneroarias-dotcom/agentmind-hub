@@ -130,6 +130,23 @@ Diseño final (estructura + juicio del modelo):
    degrada a `insufficient_evidence` (mismo razonamiento que el requisito
    estructural: una autodeclaración de confianza no verificada no basta).
 
+**Caso intermedio, añadido tras un caso real en producción (no cambia el
+enum, refina qué va en `rca_partial_findings`):** una incidencia nueva cuyo
+síntoma exacto no coincide con ningún histórico ni con el código real es
+esperable, no un fallo de búsqueda — el corpus sintético tiene un único bug
+canónico por arquetipo en `codebase-toy-repo/` pero variaciones
+independientes en `incident_history`/`test`/`edge_cases`, así que el detalle
+literal (método, línea) a menudo no va a coincidir en ningún sitio. Cuando
+el agente encuentra el MISMO componente con un problema de la MISMA
+naturaleza técnica (no solo la misma categoría/objeto) pero no el síntoma
+exacto, sigue siendo `insufficient_evidence` (no hay causa confirmada) —
+pero `rca_partial_findings` debe nombrar el patrón, su procedencia, y la
+confianza del propio modelo en que ese patrón sea relevante, en vez de un
+genérico "no encontré nada". Ver `rca-agent-prompt.md`, sección "Cuándo
+concluir", con el ejemplo exacto de redacción esperada. El parecido tiene
+que ser real (mismo componente + mismo mecanismo de fallo) — una conexión
+superficial no cuenta y el prompt lo dice así de explícito.
+
 ## rca_status — 5 valores (CERRADO, `Literal` real en `state.RcaStatus`)
 
 Cerrado de verdad, no solo documentado: `state.py` define

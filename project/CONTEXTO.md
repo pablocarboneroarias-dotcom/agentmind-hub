@@ -227,3 +227,49 @@ y se aplica en S4.
   entre specs (vocabulario de business_process, redondeo "Media-alta" -> "alta",
   tabla de SLA operativa). Pendiente: correr esto contra el modelo real
   (Ollama/LiteLLM) en vez de los dobles de test, y el "tócalo una vez" de S2.
+- **S3 (construcción, 2026-07-27/28):** corpus RAG + RCA Agent completos y
+  probados contra `langgraph dev` real (no solo dobles de test).
+  - **Corpus pgvector** (`docs/specs/rag-corpus-spec-s3.md`): 4 tablas —
+    `incident_history` (150), `technical_docs` (25), `runbooks` (40 chunks
+    de 8 runbooks), `codebase_artifacts` (27, incluida columna `file_path`
+    añadida tras uso real). Embeddings con `embeddinggemma` (Ollama), no
+    `nomic-embed-text` (decisión: multilingüe, el corpus es 100% español).
+    Postgres en el contenedor Docker compartido `agentops-postgres`
+    (`pgvector/pgvector:pg16`), DB propia `agentmind`.
+  - **`codebase-toy-repo/`**: repo git independiente (gitignoreado aquí) con
+    10 fichas de feature + 5 ficheros de código reales, uno por arquetipo
+    de `dominio-salesforce.md` que es código de verdad (los declarativos —
+    sharing rules, dedup rules, price rules, dashboard, workflow rule — solo
+    tienen ficha, sin `.cls`/`.js` fantasma).
+  - **RCA Agent** (`docs/specs/spec-rca-agent.md` + `rca-agent-prompt.md`,
+    consolidando `rca-decisiones-s3.md`): `rca_node` es un agente ReAct real
+    sobre `react_agent.py` de Fase 1, con 5 tools read-only (4 RAG +
+    `read_codebase_repo`). `rca_status` cerrado como `Literal` de verdad
+    (`state.RcaStatus`, 5 valores incl. `model_error`), verificado en
+    runtime (`rca_agent._finalize`). Dos gates antes de aceptar `completed`
+    autodeclarado por el modelo: ≥2 tool calls y confianza ≥80 (si no,
+    degrada a `insufficient_evidence`). `graph.py`: `_rca_placeholder_node`
+    sustituido por el nodo real, sin tocar `intake`/`priority`.
+  - **Dos bugs reales encontrados y corregidos ejecutando contra el modelo
+    de verdad** (no en tests con dobles): (1) el agente adivinaba rutas de
+    Salesforce DX genéricas al intentar `read_codebase_repo` porque
+    `search_codebase` no exponía la ruta real → se añadió
+    `codebase_artifacts.file_path`, expuesto como `ruta_repo` en el
+    resultado. (2) el agente, tras encontrar evidencia directa suficiente
+    (un comentario de bug explícito en el código), seguía "verificando" con
+    más llamadas a la misma tool hasta agotar `token_budget` → se añadió
+    `max_calls_per_tool` a `ReActAgent` (tope duro de 2 por tool,
+    verificado por código) + instrucción explícita en el prompt.
+  - **Infra:** `fastapi` añadido al grupo `dev` (dependencia transitiva no
+    declarada de `langgraph-api`, sin él `langgraph dev` revienta).
+  - **Estado real, no proyectado:** probado end-to-end vía `langgraph dev` +
+    LangSmith Studio con un ticket real de CPQ — el pipeline completo
+    (Intake → Priority → RCA) corrió contra Postgres/Ollama/Claude real y
+    encontró la causa raíz correcta tras las dos correcciones de arriba.
+  - **30 tests** (`test_react_agent.py`, `test_codebase_repo.py`,
+    `test_rca_agent.py`, más los de S2), todos en verde.
+  - **Pendiente:** correr el test set completo (`data/incidents/test/`, 30
+    tickets) y los edge cases (`data/incidents/edge_cases/`, 20) contra el
+    pipeline real para evaluar end-to-end, y el "tócalo una vez" formal de
+    S3 (ya cubierto en la práctica: las consultas RAG manuales de
+    `scripts/verify_rag_loop.py` y las dos ejecuciones reales de arriba).

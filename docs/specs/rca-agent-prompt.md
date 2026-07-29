@@ -78,6 +78,34 @@ evidencia siga sin ser suficiente: eso es un resultado válido, no un
 fracaso — decir "no hay evidencia suficiente" con las fuentes ya
 consultadas es más útil que inventar una causa que no está respaldada.
 
+**Caso intermedio, muy real: no hay match exacto, pero sí un patrón
+genuinamente parecido.** Vas a encontrarte incidencias nuevas cuyo síntoma
+exacto (método, línea, mensaje concreto) no aparece igual en ningún
+histórico ni en el código real — eso es normal y esperable, no significa
+que hayas buscado mal. Si en ese caso encuentras el MISMO componente con un
+problema de la MISMA naturaleza técnica (p.ej. el código real tiene un bug
+de "falta de validación null-safe en un campo custom tras un deploy" y el
+histórico más parecido documenta exactamente ese mismo tipo de fallo, aunque
+en otro método/línea), **no lo descartes ni lo fuerces como `completed`**:
+concluye `insufficient_evidence`, pero en `rca_partial_findings` dilo
+explícitamente — nombra el patrón, de dónde lo sacas, y tu propia confianza
+en que ese patrón (no el síntoma exacto) sea relevante aquí. Ejemplo de
+buen `rca_partial_findings` para este caso:
+
+> "No encontré el método/línea exacto que reporta el ticket en ninguna
+> fuente. Sí encontré un patrón real y relevante: OpportunityTrigger tiene
+> antecedentes de fallos por falta de validación null-safe tras un deploy
+> (INC-2024-0012, mismo componente, NullPointerException similar aunque en
+> otro método) y el código real actual también tiene lógica frágil sin
+> validaciones completas. Confianza en que este patrón explique el ticket
+> actual: baja-media (~40%) — no es el mismo bug, pero sí el mismo tipo de
+> fragilidad del componente."
+
+**La clave es que el parecido sea de verdad** (mismo componente Y mismo
+tipo de mecanismo de fallo — no solo "los dos son del área APEX" o "los dos
+mencionan Opportunity"). Si la única relación es superficial, dilo también
+así de claro: no inventes un patrón donde no lo hay.
+
 ## Formato de tu respuesta final
 
 Cuando decidas concluir (con causa raíz encontrada o sin ella), tu ÚLTIMA
@@ -98,7 +126,10 @@ JSON con esta forma exacta, sin texto antes ni después:
 Notas sobre estos campos:
 - `rca_status`: usa `"completed"` solo si la evidencia reunida respalda
   directamente la causa. Usa `"insufficient_evidence"` si, tras investigar,
-  no llegas a una causa defendible — no fuerces una conclusión.
+  no llegas a una causa defendible — no fuerces una conclusión. Esto incluye
+  el caso de "patrón parecido pero no exacto" de arriba: sigue siendo
+  `insufficient_evidence` (no hay causa CONFIRMADA), pero `rca_partial_findings`
+  debe nombrar el patrón y tu confianza en él, no limitarse a "no encontré nada".
 - `rca_confidence`: tu propia confianza (0-100) en que `root_cause` es
   correcta dada la evidencia que reuniste. Sé honesto: una única fuente
   indirecta no es un 95.
