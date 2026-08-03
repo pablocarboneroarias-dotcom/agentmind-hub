@@ -16,6 +16,7 @@ parada") antes de aceptarla — si no los pasa, degrada a
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -153,6 +154,59 @@ def _build_evidence(messages: list[dict]) -> list[str]:
     return evidence
 
 
+# Patrones de extracción de IDs por tool de RAG, sobre el texto CRUDO (sin
+# truncar) que devuelve cada una (ver `rag.py`). 3 de las 4 tools comparten
+# el mismo formato de línea `"{i}. [{id}] distancia=..."`; `search_runbooks`
+# es la excepción porque agrupa por runbook completo, no por línea suelta:
+# `Runbook: "{title}" ({runbook_id}, categoria=...)`.
+_LINE_BRACKET_ID = re.compile(r"^\d+\.\s*\[([^\]]+)\]", re.MULTILINE)
+_RUNBOOK_ID = re.compile(r"\(([^,()]+),\s*categoria=")
+
+_SOURCE_ID_PATTERNS: dict[str, re.Pattern[str]] = {
+    "query_incident_history": _LINE_BRACKET_ID,
+    "search_technical_docs": _LINE_BRACKET_ID,
+    "search_codebase": _LINE_BRACKET_ID,
+    "search_runbooks": _RUNBOOK_ID,
+}
+
+_SOURCE_STATE_FIELD_BY_TOOL: dict[str, str] = {
+    "query_incident_history": "rca_incident_source_ids",
+    "search_technical_docs": "rca_technical_doc_ids",
+    "search_codebase": "rca_codebase_chunk_ids",
+    "search_runbooks": "rca_runbook_ids",
+}
+
+
+def _extract_source_ids(messages: list[dict]) -> dict[str, list[str]]:
+    """Extrae por código los IDs de fuentes (runbook_id, doc_id, incident_id,
+    chunk_id) citados en las observaciones de las 4 tools de RAG.
+
+    Deliberadamente NO se apoya en `similar_incidents` (autodeclarado por el
+    modelo en el JSON final) ni en `rca_evidence` (que trunca a 300 chars y
+    podría cortar el ID). Lee `messages` -- el transcript sin truncar -- y
+    aplica regex sobre el formato fijo que ya emite `rag.py`. Si una tool
+    devuelve "sin resultados" o un error, el texto no matchea el patrón y
+    simplemente no aporta IDs, sin necesidad de filtrarlo aparte.
+
+    Es el equivalente, para trazabilidad de fuentes, de lo que los gates de
+    `rca_status` hacen para el veredicto: verificar por código en vez de
+    confiar en que el modelo lo declare bien.
+    """
+    found: dict[str, list[str]] = {field: [] for field in _SOURCE_STATE_FIELD_BY_TOOL.values()}
+    for m in messages:
+        if m.get("role") != "tool":
+            continue
+        pattern = _SOURCE_ID_PATTERNS.get(m.get("name", ""))
+        if pattern is None:
+            continue
+        field = _SOURCE_STATE_FIELD_BY_TOOL[m["name"]]
+        for match in pattern.finditer(m.get("content") or ""):
+            source_id = match.group(1).strip()
+            if source_id and source_id not in found[field]:
+                found[field].append(source_id)
+    return found
+
+
 def _last_assistant_text(messages: list[dict]) -> str:
     for m in reversed(messages):
         if m.get("role") == "assistant" and m.get("content"):
@@ -216,12 +270,17 @@ def rca_node(
             "rca_partial_findings": f"Fallo total del modelo durante la investigación: {exc}",
             "rca_iterations_used": 0,
             "similar_incidents": [],
+            "rca_incident_source_ids": [],
+            "rca_technical_doc_ids": [],
+            "rca_runbook_ids": [],
+            "rca_codebase_chunk_ids": [],
             "needs_human_review": True,
             "trace": [f"rca: fallo total del modelo ({exc}) -> model_error"],
         })
 
     evidence = _build_evidence(result.messages)
     tool_call_count = _count_tool_calls(result.messages)
+    source_ids = _extract_source_ids(result.messages)
 
     # --- Caminos de parada del harness (react_agent.py), no del modelo ---
     if result.stop_reason in ("max_iterations", "token_budget"):
@@ -237,6 +296,7 @@ def rca_node(
             ),
             "rca_iterations_used": result.iterations,
             "similar_incidents": [],
+            **source_ids,
             "needs_human_review": True,
             "trace": [
                 f"rca: {result.stop_reason} tras {result.iterations} iteraciones "
@@ -263,6 +323,7 @@ def rca_node(
             "rca_partial_findings": f"Respuesta final no parseable como JSON ({exc}): {result.answer!r}",
             "rca_iterations_used": result.iterations,
             "similar_incidents": [],
+            **source_ids,
             "needs_human_review": True,
             "trace": [
                 f"rca: respuesta final no parseable -> insufficient_evidence "
@@ -308,6 +369,7 @@ def rca_node(
         "rca_partial_findings": partial_findings or "(sin resumen del modelo)",
         "rca_iterations_used": result.iterations,
         "similar_incidents": final_similar,
+        **source_ids,
         "needs_human_review": rca_status != "completed",
         "trace": [trace_msg],
     })

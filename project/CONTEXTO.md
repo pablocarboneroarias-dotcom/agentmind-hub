@@ -325,3 +325,95 @@ y se aplica en S4.
   Corrective Developer) → revisión → Claude Code implementa.
 - **Deuda abierta, no urgente:** evaluación cuantitativa del test
   set/edge cases de S3 (ver arriba) — retomar cuando convenga, no bloquea S4.
+
+## S4 (arrancada 2026-08-03) — checkpoint de fin de sesión
+
+**Estado: capa de arquitectura + spec ESCRITOS, sin implementar todavía.**
+Próxima sesión arranca directo en revisión final del spec (o directamente en
+Claude Code si no hay más cambios) — no hay que repetir la discusión de
+arquitectura.
+
+### Ajuste retroactivo a S3 (RCA Agent), hecho vía Claude Code MCP
+
+Al discutir cómo el Solution Agent reutilizaría la evidencia del RCA, se
+detectó un hueco: `similar_incidents` es autodeclarado por el modelo (sin
+verificación), y no existía ningún ID estructurado para runbooks/docs
+técnicos/artefactos de código citados como evidencia — solo texto libre
+truncado a 300 chars en `rca_evidence`. Se implementó la opción "verificado
+por código" (mismo principio que los gates de `rca_status`, no fiarse de la
+autodeclaración):
+- 4 campos nuevos en `IncidentState` (`state.py`): `rca_incident_source_ids`,
+  `rca_technical_doc_ids`, `rca_runbook_ids`, `rca_codebase_chunk_ids`.
+- `_extract_source_ids()` en `rca_agent.py`: regex sobre el texto CRUDO
+  (sin truncar) de las observaciones de las 4 tools de RAG — 3 comparten
+  el formato `"{i}. [{id}] distancia=..."`, `search_runbooks` usa
+  `(runbook_id, categoria=...)`. Conectado en los 4 caminos de retorno de
+  `rca_node` (éxito, max_iterations/token_budget, JSON no parseable,
+  fallo total del modelo) para que los campos existan siempre, aunque
+  vacíos.
+- `similar_incidents` (autodeclarado) se deja intacto por compatibilidad —
+  los nuevos campos son su contrapartida verificada, no un reemplazo.
+- 2 tests nuevos en `test_rca_agent.py` (extracción con formato real de
+  `rag.py`; campos presentes-pero-vacíos en el camino de corte por
+  límite). **33/33 tests en verde** (31 + 2).
+
+### Decisiones de arquitectura de S4 (cerradas)
+
+- **Patrón real: routing determinista + worker condicional**, NO
+  orquestador-worker "puro" — el camino es predecible (evidencia citada →
+  verifica; si no, investiga código), no hay decisión dinámica de qué
+  lanzar ni paralelismo. El router es código, no un LLM: auditable con test
+  unitario sin invocar ningún modelo.
+- **Router:** ¿`rca_runbook_ids` o `rca_technical_doc_ids` no vacíos? →
+  Worker A (verificación). Si no → Worker B (código). Deliberadamente NO
+  usa `rca_incident_source_ids` como disparador (un histórico similar no
+  garantiza procedimiento reutilizable).
+- **Worker A (verificación documental):** NO es agente — 1 llamada al
+  modelo con `root_cause` + contenido completo del doc/runbook citado,
+  opcionalmente +1 tool call de confirmación al código. Perfil `fast`
+  (tarea de extracción acotada, no razonamiento causal) — decisión tomada
+  con Pablo, abierta a revisión si la calidad no acompaña.
+- **Worker B (investigación de código):** SÍ es agente ReAct real, hermano
+  del RCA — mismo criterio ("el camino de exploración no se puede programar
+  de antemano"). Presupuesto elevado en **P1+P2** (no solo P1 como RCA): el
+  volumen de Worker B ya está acotado por el propio router, así que el
+  argumento de "correrán muchas al día" que limitaba RCA a solo-P1 no
+  aplica igual aquí. Marcado explícitamente como **hipótesis a validar con
+  medición real**, no decisión cerrada.
+- **`cited_source_mismatch` (caso: doc citado mismatch tras verificar) NO
+  cae a Worker B** — decisión explícita con Pablo: lanzar investigación de
+  código bajo la premisa "el RCA encontró algo" cuando esa premisa ya
+  resultó falsa es tirar presupuesto y es un cierre en falso. Queda en su
+  propio estado (no en `insufficient_evidence` genérico) porque es señal de
+  calidad sobre el propio RCA, no un fallo de Solution.
+
+### Spec escrita: `docs/specs/spec-solution-agent.md`
+
+Sigue el mismo formato que `spec-rca-agent.md`. Contenido: router +
+Worker A + Worker B (arriba), `solution_status` con 6 valores (`completed`,
+`cited_source_mismatch`, `max_iterations`, `token_budget`,
+`insufficient_evidence`, `model_error`) como `Literal` real (mismo patrón
+que `RcaStatus`), tabla de inputs/outputs, nota de gobernanza, y entregable
+esperado de Claude Code.
+
+**Gap detectado al escribir la spec, no implementado todavía:** Worker A
+necesita releer el documento EXACTO citado por el RCA sin repetir una
+búsqueda semántica (que podría devolver un top-k distinto). `rag.py` solo
+tiene búsqueda semántica hoy — faltan `get_runbook_by_id(runbook_id)` y
+`get_technical_doc_by_id(doc_id)` (lookup directo, sin embedding). Recogido
+en el "Entregable esperado" de la spec, punto 2.
+
+**Abierto explícitamente en la spec (no decidido a ciegas):**
+1. Perfil de Worker A (`fast` vs `smart`) — sin medición real todavía.
+2. Valores exactos de `SOLUTION_LIMITS_ELEVATED` (P1+P2) — a medir con
+   llamadas reales, mismo método que `RCA_LIMITS_P1` en S3.
+
+### Próximo paso concreto
+
+Repasar `docs/specs/spec-solution-agent.md` línea a línea con Pablo (quedó a
+medio revisar — se validó el perfil de Worker A pero no el resto línea por
+línea) y, si no hay más cambios, dirigir a Claude Code para implementar:
+`state.py` (`SolutionStatus` + 4 campos nuevos) → `rag.py` (2 funciones de
+lookup) → `solution_agent.py` (router + Worker A + Worker B + `solution_node`)
+→ conectar en `graph.py` → tests unitarios con dobles deterministas (mismo
+mecanismo que `test_rca_agent.py`).

@@ -254,3 +254,94 @@ def test_rca_degrada_completed_con_pocas_tool_calls(monkeypatch):
     assert delta["rca_status"] == "insufficient_evidence"
     assert delta["root_cause"] == ""
     assert "degradado" in delta["trace"][0]
+
+
+# --- IDs de fuentes extraídos por código (no autodeclarados) -------------------
+
+def test_rca_extrae_source_ids_del_texto_crudo_de_las_tools(monkeypatch):
+    """`rca_incident_source_ids`/`rca_technical_doc_ids`/`rca_runbook_ids`/
+    `rca_codebase_chunk_ids` deben extraerse del texto CRUDO que devuelven
+    las tools de RAG -- por código, no de lo que el modelo declare en su
+    JSON final -- para no depender de que el modelo cite bien sus fuentes
+    (mismo principio que los gates de `rca_status`).
+
+    Las observaciones de mentira aquí replican el formato REAL de `rag.py`
+    (no el genérico `_fake_run_tool_ok` que usan el resto de tests), porque
+    es justo ese formato el que `_extract_source_ids` parsea con regex.
+    """
+
+    def fake_run_tool_real_format(name: str, arguments: str) -> str:
+        if name == "query_incident_history":
+            return (
+                '1 incidencia(s) similares encontradas para: "x"\n\n'
+                "1. [INC-2024-0980] distancia=0.120 | categoria=APEX sistema=SALES_CLOUD "
+                "severidad=alta usuarios_afectados=12 objetos=['Opportunity'] "
+                "tiempo_resolucion=3.5h creado=2024-11-02\n   resumen truncado..."
+            )
+        if name == "search_runbooks":
+            return (
+                '1 runbook(s) encontrados para: "x"\n\n'
+                'Runbook: "Diagnóstico de fallos en triggers de Opportunity" '
+                "(RB-014, categoria=APEX, distancia=0.089)\n"
+                "Paso 1/3: revisa el trigger..."
+            )
+        if name == "search_technical_docs":
+            return (
+                '1 documento(s) técnico(s) encontrados para: "x"\n\n'
+                "1. [TD-233] distancia=0.150 | tipo=trigger componente=OpportunityTrigger "
+                "objetos=['Opportunity'] proceso_negocio=SALES_FLOW\n   resumen truncado..."
+            )
+        return f"[fake observation for {name}] arguments={arguments}"
+
+    monkeypatch.setattr(ra, "run_tool", fake_run_tool_real_format)
+
+    calls = [
+        _tool_call_completion("query_incident_history", {"query": "x"}, call_id="1"),
+        _tool_call_completion("search_runbooks", {"query": "x"}, call_id="2"),
+        _tool_call_completion("search_technical_docs", {"query": "x"}, call_id="3"),
+        _final_answer_completion({
+            "rca_status": "completed",
+            "root_cause": "Causa confirmada con runbook y doc técnico.",
+            "rca_confidence": 90,
+            "rca_corroboration": "multi_source",
+            "rca_partial_findings": "Runbook + doc técnico coinciden.",
+            # Deliberadamente vacío: lo que importa es que los IDs salgan
+            # de la extracción por código, no de esta autodeclaración.
+            "similar_incidents": [],
+        }),
+    ]
+    it = iter(calls)
+
+    def fake_complete(profile, messages, tools=None, **kwargs):
+        return next(it)
+
+    state = _base_state()
+    delta = rca_node(state, complete_fn=fake_complete)
+    _print_full_state("Extra: source_ids extraídos por código", state, delta)
+
+    assert delta["rca_incident_source_ids"] == ["INC-2024-0980"]
+    assert delta["rca_runbook_ids"] == ["RB-014"]
+    assert delta["rca_technical_doc_ids"] == ["TD-233"]
+    assert delta["rca_codebase_chunk_ids"] == []
+
+
+def test_rca_source_ids_vacios_cuando_el_agente_corta_por_limite(monkeypatch):
+    """Camino max_iterations/token_budget: los campos deben existir (listas
+    vacías si no hubo match), no faltar del delta -- el Solution Agent (S4)
+    va a leerlos incondicionalmente."""
+    monkeypatch.setattr(ra, "run_tool", _fake_run_tool_ok)
+
+    def fake_complete(profile, messages, tools=None, **kwargs):
+        return _tool_call_completion("query_incident_history", {"query": "algo"}, call_id="x")
+
+    state = _base_state()
+    delta = rca_node(state, complete_fn=fake_complete, limits=AgentLimits(max_iterations=2, token_budget=100_000))
+
+    for field in (
+        "rca_incident_source_ids",
+        "rca_technical_doc_ids",
+        "rca_runbook_ids",
+        "rca_codebase_chunk_ids",
+    ):
+        assert field in delta
+        assert delta[field] == []

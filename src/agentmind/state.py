@@ -88,6 +88,16 @@ class IncidentState(TypedDict, total=False):
     rca_partial_findings: str         # resumen de la investigación, siempre relleno
     rca_iterations_used: int          # iteraciones del bucle ReAct consumidas
     similar_incidents: list[str]      # ids de incident_history citados como evidencia
+    # Contrapartida "verificada por código" de similar_incidents: extraídos con
+    # regex del texto CRUDO (sin truncar) que devolvieron las tools de RAG, no
+    # autodeclarados por el modelo en su JSON final. Mismo principio que los
+    # gates de rca_status: no fiarse de que el modelo cite bien sus fuentes.
+    # Ver `_extract_source_ids` en rca_agent.py. Consumidos por el Solution
+    # Agent (S4) para ir directo al runbook/doc citado sin repetir retrieval.
+    rca_incident_source_ids: list[str]    # ids de incident_history vistos en tool outputs
+    rca_technical_doc_ids: list[str]      # ids de technical_docs vistos en tool outputs
+    rca_runbook_ids: list[str]            # ids de runbooks vistos en tool outputs
+    rca_codebase_chunk_ids: list[str]     # ids de codebase_artifacts vistos en tool outputs
 
     # --- Solution Agent (Semana 4) ---
     proposed_solution: str
