@@ -215,3 +215,82 @@ def search_codebase(query: str, k: int = 5) -> str:
             f"proceso_negocio={related_business_process} | {ruta}\n   {_truncate(chunk_text)}"
         )
     return "\n".join(lines)
+
+
+# --- Lookup directo por ID (S4 — Solution Agent, Worker A) ------------------
+# Diferencia clave frente a las 4 funciones de arriba: NO hacen búsqueda
+# semántica (sin `embed_query`, sin `<=>`). El RCA Agent ya identificó el
+# runbook/doc exacto (`rca_runbook_ids`/`rca_technical_doc_ids`, extraídos
+# por código en S3) — repetir una búsqueda semántica para releerlo es
+# redundante y podría devolver un top-k distinto. Devuelven el contenido
+# COMPLETO sin truncar (a diferencia de `_truncate` arriba): Worker A
+# necesita el documento entero para verificar si aplica a la causa raíz,
+# no un snippet de 600 caracteres.
+
+
+@traced("rag.get_runbook_by_id", run_type="retriever")
+def get_runbook_by_id(runbook_id: str) -> str:
+    """Lee el runbook COMPLETO por su ID exacto, sin búsqueda semántica.
+
+    Mismo query relacional (ordenado por step_number) que usa el segundo
+    paso de `search_runbooks`, pero filtrando directo por `runbook_id` en
+    vez de partir de una lista de candidatos por distancia.
+    """
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT runbook_title, category, step_number, total_steps, chunk_text
+                FROM runbooks
+                WHERE runbook_id = %(rid)s
+                ORDER BY step_number;
+                """,
+                {"rid": runbook_id},
+            )
+            rows = cur.fetchall()
+    except Exception as exc:  # noqa: BLE001
+        return f"Error consultando runbooks por ID: {exc}"
+
+    if not rows:
+        return f"Error: no se encontró ningún runbook con id '{runbook_id}'."
+
+    runbook_title, category, _, _, _ = rows[0]
+    header = f'Runbook: "{runbook_title}" ({runbook_id}, categoria={category})'
+    step_lines = [
+        f"Paso {step_number}/{total_steps}: {chunk_text}"
+        for _, _, step_number, total_steps, chunk_text in rows
+    ]
+    return header + "\n" + "\n".join(step_lines)
+
+
+@traced("rag.get_technical_doc_by_id", run_type="retriever")
+def get_technical_doc_by_id(doc_id: str) -> str:
+    """Lee el documento técnico COMPLETO por su ID exacto, sin búsqueda semántica.
+
+    Mismo motivo que `get_runbook_by_id`: releer el doc EXACTO que el RCA ya
+    citó (`rca_technical_doc_ids`), no un resultado nuevo de `search_technical_docs`.
+    """
+    try:
+        with _connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT doc_id, document_type, component_name, related_objects,
+                       related_business_process, embedding_text
+                FROM technical_docs
+                WHERE doc_id = %(did)s;
+                """,
+                {"did": doc_id},
+            )
+            row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return f"Error consultando technical_docs por ID: {exc}"
+
+    if row is None:
+        return f"Error: no se encontró ningún documento técnico con id '{doc_id}'."
+
+    doc_id_, document_type, component_name, related_objects, related_business_process, embedding_text = row
+    return (
+        f"[{doc_id_}] tipo={document_type} componente={component_name} "
+        f"objetos={related_objects} proceso_negocio={related_business_process}\n"
+        f"{embedding_text}"
+    )

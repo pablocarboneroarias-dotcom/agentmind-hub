@@ -417,3 +417,72 @@ línea) y, si no hay más cambios, dirigir a Claude Code para implementar:
 lookup) → `solution_agent.py` (router + Worker A + Worker B + `solution_node`)
 → conectar en `graph.py` → tests unitarios con dobles deterministas (mismo
 mecanismo que `test_rca_agent.py`).
+
+## S4 — Solution Agent implementado (2026-08-06) — NO cerrado todavía
+
+Implementación completa vía Claude Code MCP, siguiendo `spec-solution-agent.md`
+al pie de la letra. **46/46 tests en verde** (33 anteriores + 13 nuevos).
+
+- **`state.py`:** `SolutionStatus` (`Literal` de 6 valores) + `SOLUTION_STATUSES`
+  (mismo patrón que `RcaStatus`) + 4 campos nuevos: `solution_status`,
+  `solution_confidence`, `solution_source`, `solution_evidence`.
+  `proposed_solution`/`action_plan` ya existían desde S1.
+- **`rag.py`:** `get_runbook_by_id()` y `get_technical_doc_by_id()` — lookup
+  directo por ID, sin búsqueda semántica ni truncado (a diferencia de las 4
+  funciones de S3), para que Worker A relea el documento EXACTO citado por
+  el RCA sin repetir retrieval.
+- **`solution_agent.py`** (nuevo):
+  - `_route(state)`: función de código pura (sin invocar modelo) — Worker A
+    si `rca_runbook_ids`/`rca_technical_doc_ids` no vacíos, Worker B si no.
+    Deliberadamente ignora `rca_incident_source_ids` como disparador.
+  - **Worker A** (`_worker_a`): NO es agente ReAct — 1 llamada al modelo
+    (perfil `fast`) con como mucho 1 tool call de verificación
+    (`read_codebase_repo`) adicional. `_resolve_cited_source` decide qué
+    fuente verificar si el RCA citó varias: prioriza el primer runbook
+    sobre el primer doc técnico (decisión de implementación, no en la
+    spec — documentada en el código como candidata a revisar si el RCA
+    cita múltiples fuentes a menudo).
+  - **Worker B** (`_worker_b`): agente ReAct real sobre `react_agent.py`,
+    hermano del RCA, con 3 tools read-only (`search_codebase`,
+    `read_codebase_repo`, `query_incident_history`). Presupuesto elevado
+    (`SOLUTION_LIMITS_ELEVATED`) en P1+P2 (no solo P1 como RCA) — valores
+    NUMÉRICOS SIN MEDIR TODAVÍA, reutilizan los de `RCA_LIMITS_P1` como
+    punto de partida; marcado explícito en código como hipótesis pendiente
+    de medición real (mismo método que se usó para fijar `RCA_LIMITS_P1`
+    en S3).
+  - `solution_node`: enruta, despacha al worker, nunca revienta el grafo
+    (`model_error` en el `except` general), `_finalize` verifica en runtime
+    contra `SOLUTION_STATUSES`.
+  - Dos prompts nuevos en `docs/specs/`: `solution-worker-a-prompt.md`
+    (verificación) y `solution-worker-b-prompt.md` (investigación de
+    código), mismo estilo que `rca-agent-prompt.md`.
+- **`graph.py`:** `rca -> solution -> END` (sustituye el `END` directo tras
+  `rca`); confirmado con `build_graph()` + inspección de nodos/aristas
+  (`rca -> solution`, `solution -> __end__`), sin tocar `intake`/`priority`/`rca`.
+- **13 tests nuevos** en `test_solution_agent.py`: router (4, sin invocar
+  modelo), Worker A completed/cited_source_mismatch/con 1 tool call de
+  verificación (3), Worker B completed/insufficient_evidence/max_iterations
+  (3), P1+P2 vs P3+P4 presupuesto (1), model_error en ambos workers (2).
+- **Aún NO probado contra `langgraph dev`/modelo real** — a diferencia del
+  RCA (S3), que se validó con `langgraph dev` y encontró 3 bugs reales
+  antes de cerrar. Esto es una diferencia deliberada de alcance de esta
+  sesión (implementación + tests con dobles), no un cierre completo al
+  mismo nivel de rigor que S3. **Pendiente antes de dar S4 por
+  verdaderamente cerrado** (paralelo al "tócalo una vez"/validación real
+  que sí se hizo en S3):
+  1. Correr contra `langgraph dev`/Studio con al menos un ticket real por
+     cada camino (Worker A completed, Worker A mismatch, Worker B
+     completed/insufficient) para confirmar que el modelo real respeta el
+     formato JSON pedido en los prompts.
+  2. Medir tokens/coste reales de Worker B para confirmar o ajustar
+     `SOLUTION_LIMITS_ELEVATED` (hoy son un placeholder, no una medición).
+  3. Confirmar si el perfil `fast` da resultados de calidad suficiente en
+     Worker A, o si hace falta subir a `smart` (spec ya lo dejó abierto).
+
+### Próximo paso concreto (actualizado)
+
+Antes de dar S4 por cerrado del todo: validar contra `langgraph dev` con
+casos reales (los 3 puntos de arriba). Si el resultado obliga a ajustar algo
+del spec/código, se hace y se cierra S4 con el mismo rigor que S3. Si todo
+se comporta como se espera, se cierra formalmente y se pasa a S5
+(orquestación: supervisor + routing condicional + retorno).

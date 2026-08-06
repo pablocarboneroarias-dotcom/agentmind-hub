@@ -36,6 +36,24 @@ RcaStatus = Literal[
 ]
 RCA_STATUSES: frozenset[str] = frozenset(get_args(RcaStatus))
 
+# `solution_status` (spec-solution-agent.md) — mismo principio que RcaStatus:
+# SOLUTION_STATUSES se deriva del propio Literal, y `solution_node` afirma en
+# runtime que el valor final pertenece a este conjunto (ver `solution_agent.py`).
+# `cited_source_mismatch` es un valor propio (no colapsado en
+# `insufficient_evidence`): el doc/runbook que el RCA citó como evidencia no
+# aplica a esta causa raíz al verificarlo — señal de calidad sobre el propio
+# RCA, no solo un fallo de Solution (ver spec, "Por qué cited_source_mismatch
+# NO cae a Worker B").
+SolutionStatus = Literal[
+    "completed",
+    "cited_source_mismatch",
+    "max_iterations",
+    "token_budget",
+    "insufficient_evidence",
+    "model_error",
+]
+SOLUTION_STATUSES: frozenset[str] = frozenset(get_args(SolutionStatus))
+
 
 class IncidentState(TypedDict, total=False):
     """Estado que fluye por el pipeline Intake -> Priority -> RCA -> Solution -> Comms."""
@@ -102,6 +120,10 @@ class IncidentState(TypedDict, total=False):
     # --- Solution Agent (Semana 4) ---
     proposed_solution: str
     action_plan: list[str]
+    solution_status: SolutionStatus
+    solution_confidence: float        # 0-100, mismo criterio que rca_confidence
+    solution_source: str              # "cited_document" | "code_investigation" | ""
+    solution_evidence: list[str]      # traza auditable: doc verificado (Worker A) o tool calls (Worker B)
 
     # --- Comms Agent (Semana 6) ---
     tech_team_email_draft: str
