@@ -216,12 +216,21 @@ camino que el criterio de suficiencia decida.
 
 ## Señal de enrutado
 
-RCA **no enruta condicionalmente todavía** (`graph.py`: `rca -> END`
-siempre) — el Solution Agent que consumiría `rca_status` de forma distinta
-según el valor es S4, aún no existe. Los campos de salida quedan en el
-`IncidentState` final para que un humano o el pipeline de S4 los lea; no se
-inventa un `route_after_rca` que hoy no tendría a dónde enrutar (grafo
-incremental, `CONTEXTO.md`).
+**Cerrado en S4, al conectar Solution (bug real encontrado en validación
+contra modelo real, ver `CONTEXTO.md`):** `graph.py` usa
+`route_after_rca(state)` como arista condicional — `"human_review"` si
+`needs_human_review` (los 4 casos que no son `completed`), `"solution"` si
+no. Mismo patrón que `route_after_priority`.
+
+Antes de este fix, `graph.py` tenía una arista fija `rca -> solution`
+(arrastrada de cuando Solution aún no existía). El problema: `rca_status !=
+"completed"` no implica `rca_runbook_ids`/`rca_technical_doc_ids` vacíos —
+esos campos se extraen de CUALQUIER resultado de búsqueda visto durante la
+investigación (`_extract_source_ids`), no solo de fuentes citadas en una
+conclusión. Con la arista fija, un RCA que fallaba por `token_budget`/
+`max_iterations` podía llegar a Solution con `root_cause == ""` pero fuentes
+"citadas" no vacías, engañando a `solution_agent._route` y gastando una
+llamada al modelo (Worker A) que no podía producir nada útil.
 
 ---
 

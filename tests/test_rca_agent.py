@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 
 import agentmind.agents.react_agent as ra
-from agentmind.agents.rca_agent import RCA_LIMITS_P1, rca_node
+from agentmind.agents.rca_agent import RCA_LIMITS_P1, rca_node, route_after_rca
 from agentmind.config import DEFAULT_LIMITS, AgentLimits
 from agentmind.models import Completion
 
@@ -408,3 +408,50 @@ def test_rca_source_ids_vacios_cuando_el_agente_corta_por_limite(monkeypatch):
     ):
         assert field in delta
         assert delta[field] == []
+
+
+# --- route_after_rca: arista condicional del grafo, sin invocar modelo ---------
+
+def test_route_after_rca_va_a_human_review_si_needs_human_review():
+    state = {"needs_human_review": True, "rca_status": "token_budget"}
+    assert route_after_rca(state) == "human_review"
+
+
+def test_route_after_rca_va_a_solution_si_completed():
+    state = {"needs_human_review": False, "rca_status": "completed"}
+    assert route_after_rca(state) == "solution"
+
+
+def test_route_after_rca_integrado_con_rca_node_en_los_4_status(monkeypatch):
+    """No basta con probar route_after_rca en aislado con un dict a mano --
+    hay que confirmar que el `needs_human_review` que de verdad pone
+    rca_node en cada rama produce el routing correcto (bug real: antes de
+    S4 graph.py no llamaba a esta función en absoluto, así que un test
+    puramente aislado no lo habría detectado)."""
+    monkeypatch.setattr(ra, "run_tool", _fake_run_tool_ok)
+
+    # completed -> solution
+    calls = iter([
+        _tool_call_completion("query_incident_history", {"query": "algo"}, call_id="1"),
+        _tool_call_completion("read_codebase_repo", {"path": "x"}, call_id="2"),
+        _final_answer_completion({
+            "rca_status": "completed",
+            "root_cause": "causa",
+            "rca_confidence": 92,
+            "rca_corroboration": "multi_source",
+            "rca_partial_findings": "resumen",
+            "similar_incidents": [],
+        }),
+    ])
+    delta_completed = rca_node(_base_state(), complete_fn=lambda *a, **k: next(calls))
+    assert route_after_rca(delta_completed) == "solution"
+
+    # token_budget -> human_review
+    delta_token_budget = rca_node(
+        _base_state(),
+        complete_fn=lambda profile, messages, tools=None, **kwargs: _tool_call_completion(
+            "search_technical_docs", {"query": "algo"}, call_id="x"
+        ),
+        limits=AgentLimits(max_iterations=50, token_budget=25),
+    )
+    assert route_after_rca(delta_token_budget) == "human_review"

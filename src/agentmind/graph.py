@@ -9,7 +9,8 @@ reales (S3, S4).
 
     intake --(route_after_intake)--> clarification | priority
     priority --(route_after_priority)--> human_review | rca
-    rca --> solution --> END (Comms Agent, S6, aún no existe)
+    rca --(route_after_rca)--> human_review | solution
+    solution --> END (Comms Agent, S6, aún no existe)
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ from langgraph.graph import END, StateGraph
 
 from .agents.intake_agent import intake_node, route_after_intake
 from .agents.priority_agent import priority_node, route_after_priority
-from .agents.rca_agent import rca_node
+from .agents.rca_agent import rca_node, route_after_rca
 from .agents.solution_agent import solution_node
 from .models import Completion, complete
 from .state import IncidentState
@@ -66,9 +67,14 @@ def build_graph(*, complete_fn: CompleteFn = complete):
         {"human_review": "human_review", "rca": "rca"},
     )
 
+    graph.add_conditional_edges(
+        "rca",
+        route_after_rca,
+        {"human_review": "human_review", "solution": "solution"},
+    )
+
     graph.add_edge("clarification", END)
     graph.add_edge("human_review", END)
-    graph.add_edge("rca", "solution")
     graph.add_edge("solution", END)
 
     return graph.compile()

@@ -414,3 +414,24 @@ def rca_node(
         "needs_human_review": rca_status != "completed",
         "trace": [trace_msg],
     })
+
+
+def route_after_rca(state: IncidentState) -> str:
+    """Arista condicional del grafo (spec, "Señal de enrutado" — cerrado en
+    S4 al conectar Solution).
+
+    Antes de S4 no existía ningún consumidor de `rca_status` distinto entre
+    valores, así que `graph.py` usaba una arista fija `rca -> solution`. Eso
+    dejaba pasar tickets con `rca_status != "completed"` (y por tanto
+    `root_cause == ""`) directos a Solution: `rca_runbook_ids`/
+    `rca_technical_doc_ids` pueden no estar vacíos incluso cuando RCA no
+    concluye (se extraen de CUALQUIER resultado de búsqueda visto, no solo
+    de lo citado en una conclusión — ver `_extract_source_ids`), así que el
+    router de Solution (`solution_agent._route`) se dejaba engañar y
+    despachaba a Worker A con una causa raíz vacía, gastando una llamada al
+    modelo sin poder producir nada útil. Mismo patrón que
+    `priority_agent.route_after_priority`: mira `needs_human_review`, que
+    RCA ya pone en `true` en los 4 casos que no son `completed`."""
+    if state.get("needs_human_review"):
+        return "human_review"
+    return "solution"
