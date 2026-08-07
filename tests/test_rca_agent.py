@@ -124,6 +124,69 @@ def test_rca_max_iterations(monkeypatch):
     assert len(delta["rca_evidence"]) == 3
 
 
+# --- Caso 2b: max_iterations usa el resumen de cierre forzado ------------------
+
+def test_rca_max_iterations_usa_resumen_de_cierre_forzado(monkeypatch):
+    """Tras agotar iteraciones, rca_node hace una llamada extra (sin tools)
+    pidiendo un resumen — no se conforma con `_last_assistant_text`, que
+    puede ser un fragmento de pensamiento a medias (ver spec-rca-agent.md,
+    nota de 'resumen de cierre forzado')."""
+    monkeypatch.setattr(ra, "run_tool", _fake_run_tool_ok)
+
+    tool_call_responses = [
+        _tool_call_completion("query_incident_history", {"query": "algo"}, call_id="1"),
+        _tool_call_completion("query_incident_history", {"query": "algo"}, call_id="2"),
+        _tool_call_completion("query_incident_history", {"query": "algo"}, call_id="3"),
+    ]
+    it = iter(tool_call_responses)
+
+    def fake_complete(profile, messages, tools=None, **kwargs):
+        try:
+            return next(it)
+        except StopIteration:
+            # Se agotaron las 3 iteraciones -> esta es la llamada de cierre
+            # forzado: sin tools, pide resumen en texto plano.
+            assert tools is None
+            return Completion(
+                content=(
+                    "Evidencia: histórico sin coincidencia exacta. Hipótesis "
+                    "SIN CONFIRMAR: podría ser un problema de bulkificación."
+                ),
+                tool_calls=[],
+                finish_reason="stop",
+                prompt_tokens=10,
+                completion_tokens=10,
+            )
+
+    state = _base_state()
+    delta = rca_node(state, complete_fn=fake_complete, limits=AgentLimits(max_iterations=3, token_budget=100_000))
+    _print_full_state("Caso 2b: max_iterations con resumen de cierre forzado", state, delta)
+
+    assert delta["rca_status"] == "max_iterations"
+    assert "SIN CONFIRMAR" in delta["rca_partial_findings"]
+    # El contrato no cambia por tener un mejor resumen: sigue sin causa raíz.
+    assert delta["root_cause"] == ""
+    assert delta["needs_human_review"] is True
+
+
+def test_rca_wrapup_forzado_nunca_revienta_el_grafo(monkeypatch):
+    """Si la llamada extra de cierre falla (modelo caído, etc.), se cae a
+    `_last_assistant_text` en vez de propagar la excepción — mismo principio
+    'nunca revienta el grafo' que ya aplica al resto de rca_node."""
+    monkeypatch.setattr(ra, "run_tool", _fake_run_tool_ok)
+
+    def fake_complete(profile, messages, tools=None, **kwargs):
+        if tools is None:
+            raise RuntimeError("proveedor caído")
+        return _tool_call_completion("query_incident_history", {"query": "algo"}, call_id="x")
+
+    state = _base_state()
+    delta = rca_node(state, complete_fn=fake_complete, limits=AgentLimits(max_iterations=2, token_budget=100_000))
+
+    assert delta["rca_status"] == "max_iterations"
+    assert delta["rca_partial_findings"]  # cae al fallback, no revienta
+
+
 # --- Caso 3: token_budget -------------------------------------------------------
 
 def test_rca_token_budget(monkeypatch):

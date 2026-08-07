@@ -35,6 +35,16 @@ componente, mismo sistema, pero mecanismo de fallo distinto)?
   `proposed_solution` por qué el documento no aplica — no fuerces una
   solución que no está respaldada.
 
+**Si usaste `read_codebase_repo` y esa lectura reveló una pista o solución
+candidata** (aunque el documento citado no la contenga y por tanto sigas en
+`cited_source_mismatch`): inclúyela explícitamente en `proposed_solution`,
+con el detalle concreto que encontraste (fichero, línea, fragmento
+relevante). No la descartes solo porque no cumpla el criterio de
+`completed` — la persona que revise el caso a mano debe partir de lo que ya
+encontraste, no de cero. Esto no cambia `solution_status` (sigue siendo
+`cited_source_mismatch`) ni `action_plan` (sigue `[]`) — solo asegura que el
+hallazgo de código no se pierda en un texto genérico de "no aplica".
+
 ## Formato de tu respuesta final
 
 Cuando decidas concluir, tu ÚLTIMA respuesta —sin pedir ninguna herramienta

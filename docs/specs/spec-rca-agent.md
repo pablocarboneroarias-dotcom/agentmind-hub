@@ -168,6 +168,20 @@ pertenece a ese conjunto — un typo o un 6º valor no documentado revienta con
 En los cuatro casos que no son `completed` (incluido `model_error`, ver nota
 abajo), `needs_human_review = true`.
 
+**Resumen de cierre forzado en `max_iterations`/`token_budget` (añadido tras
+validación real de S4, ver checkpoint de `CONTEXTO.md`):** `react_agent.py`
+corta en seco estos dos caminos — `answer=None`, sin darle al modelo ninguna
+oportunidad de cerrar su razonamiento. Sin corrección, `rca_partial_findings`
+quedaba en lo último que el modelo hubiera dicho en su turno anterior
+(`_last_assistant_text`): un fragmento de pensamiento a medias, a veces
+vacío, según en qué punto del bucle se cortara — nada garantizaba que fuera
+útil para quien hace la revisión humana. `rca_node` ahora hace **una llamada
+extra, acotada y sin tools** (`_forced_wrapup`) pidiendo un resumen en texto
+plano de la evidencia real encontrada y, si la hay, una hipótesis explícita
+marcada como SIN CONFIRMAR. No cambia el contrato: `rca_status` sigue siendo
+`max_iterations`/`token_budget`, `root_cause` sigue vacío, no se acepta como
+conclusión — solo mejora la calidad de un campo que ya existía.
+
 **`model_error` — 5º valor, decisión tomada al implementar (no viene de
 `rca-decisiones-s3.md`, que cierra solo 4):** para cuando `complete_fn` agota
 sus reintentos por un fallo total del modelo/proveedor — no hubo

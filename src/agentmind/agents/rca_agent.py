@@ -214,6 +214,42 @@ def _last_assistant_text(messages: list[dict]) -> str:
     return ""
 
 
+_WRAPUP_PROMPT = (
+    "Se agotó tu presupuesto de investigación (límite de recursos, no de "
+    "evidencia). No puedes pedir más herramientas. Con lo que ya "
+    "investigaste hasta ahora, responde en texto plano (NO JSON, NO "
+    "declares 'rca_status: completed'):\n"
+    "1. Qué evidencia real encontraste (fuentes concretas, no generalidades).\n"
+    "2. Si tienes una hipótesis de causa raíz o de posible solución, indícala "
+    "explícitamente dejando CLARO que es una hipótesis SIN CONFIRMAR — no "
+    "actúes como si hubieras terminado la investigación.\n"
+    "3. Qué haría falta investigar para confirmarla.\n"
+    "Sé conciso (máximo un párrafo corto por punto)."
+)
+
+
+def _forced_wrapup(messages: list[dict], complete_fn: CompleteFn) -> str:
+    """Llamada extra, acotada (sin tools) y fuera del bucle ReAct, solo para
+    los caminos `max_iterations`/`token_budget`.
+
+    Por qué hace falta: `react_agent.py` corta en seco en esos dos casos
+    (`answer=None`, sin darle al modelo ninguna oportunidad de cerrar su
+    razonamiento — ver `ReActAgent.run`). Sin esto, `rca_partial_findings`
+    quedaba en `_last_assistant_text`: lo último que el modelo dijera en su
+    turno anterior, que puede ser un fragmento de pensamiento a medias o
+    estar vacío, según en qué punto del bucle se cortara — nada garantizaba
+    que fuera un resumen útil para quien hace la revisión humana.
+
+    No se reabre ninguna investigación (no se pasan `tools`, es una única
+    llamada) y no se acepta como conclusión: el prompt exige explícitamente
+    marcar cualquier hipótesis como SIN CONFIRMAR. `rca_status` sigue siendo
+    `max_iterations`/`token_budget`, `root_cause` sigue vacío — esto solo
+    mejora la calidad del texto que ya se guardaba, no cambia el contrato."""
+    wrapup_messages = messages + [{"role": "user", "content": _WRAPUP_PROMPT}]
+    resp = complete_fn(_PROFILE, wrapup_messages, tools=None)
+    return (resp.content or "").strip()
+
+
 def _finalize(delta: dict) -> dict:
     """Cierra de verdad el `Literal` de `state.RcaStatus`: si algún camino de
     código de este fichero llegase a construir un `rca_status` fuera de
@@ -284,6 +320,10 @@ def rca_node(
 
     # --- Caminos de parada del harness (react_agent.py), no del modelo ---
     if result.stop_reason in ("max_iterations", "token_budget"):
+        try:
+            wrapup_summary = _forced_wrapup(result.messages, complete_fn)
+        except Exception:  # noqa: BLE001 - nunca revienta el grafo por esto
+            wrapup_summary = ""
         return _finalize({
             "root_cause": "",
             "rca_confidence": 0.0,
@@ -291,7 +331,8 @@ def rca_node(
             "rca_corroboration": "",
             "rca_evidence": evidence,
             "rca_partial_findings": (
-                _last_assistant_text(result.messages)
+                wrapup_summary
+                or _last_assistant_text(result.messages)
                 or "Sin conclusión: se agotó el límite antes de una respuesta final."
             ),
             "rca_iterations_used": result.iterations,
