@@ -418,7 +418,7 @@ lookup) → `solution_agent.py` (router + Worker A + Worker B + `solution_node`)
 → conectar en `graph.py` → tests unitarios con dobles deterministas (mismo
 mecanismo que `test_rca_agent.py`).
 
-## S4 — Solution Agent implementado (2026-08-06) — NO cerrado todavía
+## S4 — Solution Agent implementado (2026-08-06) — ver cierre 2026-08-07 abajo
 
 Implementación completa vía Claude Code MCP, siguiendo `spec-solution-agent.md`
 al pie de la letra. **46/46 tests en verde** (33 anteriores + 13 nuevos).
@@ -486,3 +486,94 @@ casos reales (los 3 puntos de arriba). Si el resultado obliga a ajustar algo
 del spec/código, se hace y se cierra S4 con el mismo rigor que S3. Si todo
 se comporta como se espera, se cierra formalmente y se pasa a S5
 (orquestación: supervisor + routing condicional + retorno).
+
+---
+
+## S4 — CERRADO (2026-08-07) — validación real contra `langgraph dev`/modelo real
+
+Sesión dedicada íntegramente a "tócalo una vez": los 3 puntos que quedaron
+pendientes el 2026-08-06 (arriba) se han cubierto con **7 ejecuciones reales**
+del pipeline (modelo real vía `models.complete`, Postgres/pgvector reales,
+sin dobles de test), la mayoría vía `langgraph dev`/Studio y las últimas dos
+invocando `build_graph().invoke()`/`solution_node()` directamente desde
+script cuando Studio exigió login de LangSmith que no correspondía dar por
+el agente. Mismo rigor que se aplicó a RCA en S3, que también encontró bugs
+reales en esta fase.
+
+### Caminos confirmados con modelo real
+
+| Camino | Confirmado | Incidencia(s) |
+|---|---|---|
+| RCA `completed` | ✓ | INC-2026-0806-A, INC-2026-0807-E, INC-2026-0807-G |
+| RCA sin conclusión (`token_budget`) → revisión humana | ✓ | INC-2026-0806-B, INC-2026-0806-D |
+| Worker A → `cited_source_mismatch` (con hallazgo de código remarcado) | ✓ | INC-2026-0806-A, INC-2026-0807-E, INC-2026-0807-F |
+| Worker A → `completed` (resolución 100% autónoma, `needs_human_review=false`) | ✓ | INC-2026-0807-G |
+| Worker B → `completed` | ✓ | Prueba dirigida (`solution_node` a mano, root_cause real de INC-2026-0807-F, sin fuente citada) |
+| Resumen de cierre forzado de RCA (`_forced_wrapup`) | ✓ | INC-2026-0806-B, INC-2026-0806-D |
+
+**No cubierto, aceptado como deuda menor (no bloquea el cierre):** Worker B
+en sus caminos `insufficient_evidence`/`max_iterations`/`token_budget`, y
+Worker A en su variante `model_error`. Ambos ya están cubiertos por tests
+unitarios con dobles (`test_solution_agent.py`); falta la confirmación
+contra modelo real, igual que quedaron algunos caminos de RCA sin tocar en
+S3 sin que eso bloqueara su cierre.
+
+### Bugs reales encontrados y corregidos en esta sesión
+
+1. **Worker A perdía hallazgos de código en `cited_source_mismatch`**
+   (INC-2026-0806-A): su propia tool call de verificación encontró el fix
+   real en código, pero el prompt no le exigía remarcarlo — dependía de que
+   el modelo lo narrara por iniciativa propia. Corregido en
+   `solution-worker-a-prompt.md` (commit `52a3f48`): ahora es instrucción
+   explícita, sin tocar `solution_status`/`action_plan`/`needs_human_review`.
+2. **`rca_partial_findings` era un fragmento sin curar en `token_budget`/
+   `max_iterations`** (INC-2026-0806-B): `react_agent.py` corta en seco sin
+   dar oportunidad al modelo de resumir. Corregido con `_forced_wrapup()` en
+   `rca_agent.py` (commit `52a3f48`): una llamada extra acotada (sin tools)
+   que pide un resumen estructurado con cualquier hipótesis marcada
+   explícitamente como SIN CONFIRMAR.
+3. **Bug de routing (el más serio):** `graph.py` conectaba `rca -> solution`
+   con arista fija, arrastrada de cuando Solution no existía. Un RCA que
+   fallaba por `token_budget`/`max_iterations` llegaba igualmente a Solution
+   con `root_cause` vacío, porque `rca_runbook_ids`/`rca_technical_doc_ids`
+   no se vacían solo por fallar (se extraen de cualquier resultado de
+   búsqueda visto, citado o no) — el router de Solution se dejaba engañar y
+   gastaba una llamada al modelo (Worker A) sin poder aportar nada.
+   Encontrado corriendo INC-2026-0806-B/D reales. Corregido con
+   `route_after_rca()` (mismo patrón que `route_after_priority`, mira
+   `needs_human_review`) — commit `1b6fee5`.
+
+### Hallazgo de diseño, documentado sin abrir acción (no es deuda, es una observación)
+
+**Worker B es estructuralmente raro de alcanzar por el pipeline orgánico en
+este corpus.** 4 de 4 intentos reales con tickets distintos (INC-2026-0806-A,
+0807-E, 0807-F, 0807-G) aterrizaron en Worker A, nunca en Worker B. Motivo:
+los 5 ficheros reales de `codebase-toy-repo/` tienen cada uno su ficha
+técnica correspondiente indexada (`DOC-001/002/003/006/010`), así que
+cualquier RCA que confirme una causa leyendo código real casi siempre topa
+también con un doc relacionado al buscar — y el router, tal como está
+diseñado a propósito (spec: "si RCA ya citó una fuente estructurada, hay que
+verificarla"), prefiere Worker A siempre que exista algo citable. No se
+investigó si esto es solo una propiedad de este corpus sintético
+(documentación completa) o si se repetiría en datos reales con cobertura
+documental más desigual — **candidato a revisar con datos de producción
+reales, no con más tickets sintéticos.**
+
+### Medición de coste (parcial, primer dato real — no exhaustivo)
+
+Worker B, en su única ejecución real, resolvió en 3 iteraciones/3 tool calls
+— muy por debajo de `SOLUTION_LIMITS_ELEVATED` (12 iter/150k tokens). Un solo
+dato no basta para confirmar o ajustar el límite (mismo criterio que ya se
+aplicó a `RCA_LIMITS_P1` en S3: hace falta más volumen antes de tocar el
+número), pero es evidencia de que el orden de magnitud no está disparatado.
+
+### Commits de esta sesión
+
+- `52a3f48` — Worker A (remarcar hallazgo de código) + RCA (`_forced_wrapup`).
+- `ac536de` — ignora `.claude/` (config local, no del proyecto).
+- `1b6fee5` — `route_after_rca` (el bug de routing más serio de los tres).
+
+### Próximo paso concreto (actualizado)
+
+S4 cerrado. Empezar S5 (orquestación: supervisor + routing condicional +
+retorno) en la próxima sesión.
